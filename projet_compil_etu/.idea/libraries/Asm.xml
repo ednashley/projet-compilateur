@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="Asm">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/Asm/package-search-index.zip!/" />
+      <root url="jar://$PROJECT_DIR$/Asm/member-search-index.zip!/" />
+      <root url="jar://$PROJECT_DIR$/Asm/type-search-index.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

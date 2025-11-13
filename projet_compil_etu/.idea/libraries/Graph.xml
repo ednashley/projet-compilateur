@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="Graph">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/Graph/member-search-index.zip!/" />
+      <root url="jar://$PROJECT_DIR$/Graph/package-search-index.zip!/" />
+      <root url="jar://$PROJECT_DIR$/Graph/type-search-index.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

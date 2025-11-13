@@ -1,0 +1,13 @@
+<component name="libraryTable">
+  <library name="projet_compil_etu">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/member-search-index.zip!/" />
+      <root url="jar://$PROJECT_DIR$/.zip!/" />
+      <root url="jar://$PROJECT_DIR$/package-search-index.zip!/" />
+      <root url="jar://$PROJECT_DIR$/type-search-index.zip!/" />
+      <root url="jar://$PROJECT_DIR$/antlr-4.13.0-complete.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
