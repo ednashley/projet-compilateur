@@ -1,0 +1,10 @@
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    int result = add(15, 27);
+    print(result);
+
+    return 0;
+}

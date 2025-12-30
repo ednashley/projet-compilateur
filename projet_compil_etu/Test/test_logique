@@ -1,0 +1,20 @@
+int main() {
+    bool a = true;
+    bool b = false;
+
+    bool and1 = a && b;
+    bool and2 = a && a;
+    bool or1 = a || b;
+    bool or2 = b || b;
+    bool not1 = !a;
+    bool not2 = !b;
+
+    print(and1);
+    print(and2);
+    print(or1);
+    print(or2);
+    print(not1);
+    print(not2);
+
+    return 0;
+}

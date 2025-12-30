@@ -1,0 +1,20 @@
+int main() {
+    int x = 5;
+    int y = 10;
+
+    int eq = (x == y);     // 0 (false)
+    int neq = (x != y);    // 1 (true)
+    int lt = (x < y);      // 1 (true)
+    int gt = (x > y);      // 0 (false)
+    int lte = (x <= y);    // 1 (true)
+    int gte = (x >= y);    // 0 (false)
+
+    print(eq);
+    print(neq);
+    print(lt);
+    print(gt);
+    print(lte);
+    print(gte);
+
+    return 0;
+}

@@ -1,0 +1,32 @@
+int main() {
+    int[] numbers = {10, 25, 30, 15, 20};
+
+    int sum = 0;
+    int i = 0;
+
+    while (i < 5) {
+        sum = sum + numbers[i];
+        i = i + 1;
+    }
+
+    print(sum);
+
+    int max = 0;
+    int j = 0;
+
+    while (j < 5) {
+        if (numbers[j] > max) {
+            max = numbers[j];
+        }
+        j = j + 1;
+    }
+
+    print(max);
+
+    numbers[0] = 100;
+    numbers[4] = 200;
+
+    print(numbers);
+
+    return 0;
+}

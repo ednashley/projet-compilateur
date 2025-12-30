@@ -1,0 +1,17 @@
+int main() {
+    int a = 5;
+    int b = 3;
+    int add = a + b;      // 8
+    int sub = a - b;      // 2
+    int mul = a * b;      // 15
+    int div = a / b;      // 1
+    int mod = a % b;      // 2
+
+    print(add);
+    print(sub);
+    print(mul);
+    print(div);
+    print(mod);
+
+    return 0;
+}
