@@ -9,7 +9,7 @@ import java.io.*;
 public class Main {
 	public static void main(String[] args) {
 		// Lire le fichier input.txt
-		String fichier = System.getProperty("user.dir") + "\\projet_compil_etu\\input.txt";
+		String fichier = System.getProperty("user.dir") + "\\projet_compil_etu\\input";
 		StringBuilder input = new StringBuilder();
 
 		try (BufferedReader br = new BufferedReader(new FileReader(fichier))) {
