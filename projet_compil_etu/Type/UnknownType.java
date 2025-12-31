@@ -1,5 +1,6 @@
 package Type;
 import java.util.Map;
+import java.util.HashMap;
 
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -72,32 +73,74 @@ public class UnknownType extends Type {
 
     @Override
     public Map<UnknownType, Type> unify(Type t) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'unify'");
+        // Rempli
+        if (t.equals(this)) {
+            return new HashMap<>();
+        }
+
+        // ÉTAPE CRITIQUE : Test d'occurrence (pour éviter alpha -> Array<alpha>)
+        if (t.contains(this)) {
+            // Si 't' contient la variable de type 'this', échec d'unification.
+            return null;
+        }
+
+        // Création de la substitution : {this -> t}
+        Map<UnknownType, Type> subs = new HashMap<>();
+        subs.put(this, t);
+
+        return subs;
     }
 
+    /**
+     * Substitution :
+     * Si cette variable de type est celle à substituer (v), on retourne le type de remplacement (t).
+     * Sinon, on retourne 'this' inchangé.
+     */
     @Override
     public Type substitute(UnknownType v, Type t) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'substitute'");
+        // Rempli
+        if (this.equals(v)) {
+            return t; // C'est la variable de type, on la remplace.
+        }
+        return this; // Ce n'est pas la variable à remplacer.
     }
 
+    /**
+     * Test d'occurrence :
+     * Une variable de type 'this' contient 'v' si et seulement si 'this' et 'v' sont la même variable.
+     */
     @Override
     public boolean contains(UnknownType v) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'contains'");
+        // Rempli
+        return this.equals(v);
     }
 
+    /**
+     * Test d'égalité :
+     * Deux UnknownType sont égaux si et seulement si ils ont le même numéro d'index,
+     */
     @Override
     public boolean equals(Object t) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'equals'");
+        // Rempli
+        if (this == t) return true;
+        if (!(t instanceof UnknownType)) return false;
+
+        UnknownType other = (UnknownType) t;
+        // On compare l'index de la variable de type.
+        return this.varIndex == other.varIndex;
     }
 
+    /**
+     * Représentation en chaîne de caractères.
+     * Utilise le nom et l'index pour garantir l'unicité dans la HashMap.
+     */
     @Override
     public String toString() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'toString'");
+        // Rempli
+        if (varName.equals("#")) {
+            return "alpha" + this.varIndex; // Notation standard pour les variables de type
+        }
+        return this.varName + "_" + this.varIndex;
     }
 
     
