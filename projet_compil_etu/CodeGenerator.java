@@ -21,6 +21,8 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
     private final int SP = 2; //  stackPointeur pile
     private final int TP = 1; // heap / tableaux
     private Stack<Map<String, Integer>> scopeStack = new Stack<>(); // une pile de dictionnaires
+    private Map<String, Integer> returnRegisters = new HashMap<>();
+    private String currentFunction = "";
 
 
 
@@ -953,42 +955,6 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
         return program;
     }
-    @Override
-    public Program visitCall(grammarTCLParser.CallContext ctx) {
-        Program program = new Program();
-
-        String functionName = ctx.VAR().getText();
-        int nbArgs = ctx.expr().size();
-
-        ArrayList<Integer> argRegisters = new ArrayList<>();
-
-        // 1. Évaluer les arguments
-        for (int i = 0; i < nbArgs; i++) {
-            program.addInstructions(visit(ctx.expr(i)));
-            argRegisters.add(regCount - 1);
-        }
-
-        // 2. Empiler les arguments
-        for (int reg : argRegisters) {
-            program.addInstruction(new UALi(UALi.Op.ADD, SP, SP, 1)); // SP++
-            program.addInstruction(new Mem(Mem.Op.ST, reg, SP));     // mem[SP] = arg
-        }
-
-        // 3. Appel
-        program.addInstruction(new JumpCall(JumpCall.Op.CALL, functionName));
-
-        // 4. Récupérer le résultat
-        int resultReg = newRegister();
-        program.addInstruction(new Mem(Mem.Op.LD, resultReg, SP)); // result = mem[SP]
-        program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, 1));  // pop result
-
-        // 5. Nettoyer les arguments
-        if (nbArgs > 0) {
-            program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, nbArgs));
-        }
-
-        return program;
-    }
 
     @Override
     public Program visitBase_type(grammarTCLParser.Base_typeContext ctx) throws RuntimeException {
@@ -1000,43 +966,64 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         throw new RuntimeException("Method 'visitTab_type' should not be called");
     }
 
-
-
     @Override
-    public Program visitReturn(grammarTCLParser.ReturnContext ctx) {
+    public Program visitCall(grammarTCLParser.CallContext ctx) {
         Program program = new Program();
 
-        // Évaluer l'expression retournée
-        program.addInstructions(visit(ctx.expr()));
-        int resultReg = regCount - 1;
+        String functionName = ctx.VAR().getText();
+        int nbArgs = ctx.expr().size();
 
-        // Écrire le résultat AU SOMMET DE LA PILE (slot réservé par le caller)
-        program.addInstruction(new Mem(Mem.Op.ST, resultReg, SP));
-
-        // Retour
-        program.addInstruction(new Ret());
-
-        return program;
-    }
-
-
-    @Override
-    public Program visitCore_fct(grammarTCLParser.Core_fctContext ctx) {
-        Program program = new Program();
-
-        // Instructions du corps
-        for (grammarTCLParser.InstrContext instrContext : ctx.instr()) {
-            program.addInstructions(visit(instrContext));
+        // Récupérer le registre de retour de la fonction appelée
+        Integer returnRegister = returnRegisters.get(functionName);
+        if (returnRegister == null && !functionName.equals("main")) {
+            throw new RuntimeException("Fonction non déclarée : " + functionName);
         }
 
-        // S'il y a un return expr implicite
-        if (ctx.expr() != null) {
-            program.addInstructions(visit(ctx.expr()));
-            int resultReg = regCount - 1;
+        // 1. Évaluer tous les arguments
+        ArrayList<Integer> argRegisters = new ArrayList<>();
+        for (int i = 0; i < nbArgs; i++) {
+            program.addInstructions(visit(ctx.expr(i)));
+            argRegisters.add(regCount - 1);
+        }
 
-            // Écrire le résultat AU SOMMET (sans modifier SP)
-            program.addInstruction(new Mem(Mem.Op.ST, resultReg, SP));
-            program.addInstruction(new Ret());
+        // 2. Déterminer le dernier registre utilisé APRÈS évaluation des arguments
+        int lastUsedRegister = regCount - 1;
+
+        // 3. Si appel récursif : sauvegarder TOUS les registres actifs
+        //    (sauf le registre de retour qui sera écrasé)
+        if (functionName.equals(this.currentFunction) && returnRegister != null) {
+            for (int i = returnRegister + 1; i <= lastUsedRegister; i++) {
+                program.addInstruction(new Mem(Mem.Op.ST, i, SP));
+                program.addInstruction(new UALi(UALi.Op.ADD, SP, SP, 1));
+            }
+        }
+
+        // 4. Empiler les arguments (UNE SEULE FOIS)
+        for (int reg : argRegisters) {
+            program.addInstruction(new Mem(Mem.Op.ST, reg, SP));
+            program.addInstruction(new UALi(UALi.Op.ADD, SP, SP, 1));
+        }
+
+        // 5. Appel de la fonction
+        program.addInstruction(new JumpCall(JumpCall.Op.CALL, functionName));
+
+        // 6. Dépiler les arguments
+        if (nbArgs > 0) {
+            program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, nbArgs));
+        }
+
+        // 7. Récupérer le résultat dans un NOUVEAU registre
+        int resultReg = newRegister();
+        if (returnRegister != null) {
+            program.addInstruction(new UALi(UALi.Op.ADD, resultReg, returnRegister, 0));
+        }
+
+        // 8. Si appel récursif : restaurer les registres dans l'ordre INVERSE
+        if (functionName.equals(this.currentFunction) && returnRegister != null) {
+            for (int i = lastUsedRegister; i > returnRegister; i--) {
+                program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, 1));
+                program.addInstruction(new Mem(Mem.Op.LD, i, SP));
+            }
         }
 
         return program;
@@ -1054,28 +1041,98 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
         enterScope();
 
+        String previousFunction = this.currentFunction;
+        this.currentFunction = functionName;
+
         int nbArgs = ctx.VAR().size() - 1;
 
-        // Les arguments sont sur la pile, SP pointe sur le dernier argument
-        for (int i = nbArgs - 1; i >= 0; i--) {
-            int reg = newRegister();
-            String argName = ctx.VAR(i + 1).getText();
-            declareVar(argName, reg);
-
-            int offset = nbArgs - 1 - i;
-            if (offset == 0) {
-                program.addInstruction(new Mem(Mem.Op.LD, reg, SP));
-            } else {
-                int offsetReg = newRegister();
-                program.addInstruction(new UALi(UALi.Op.SUB, offsetReg, SP, offset));
-                program.addInstruction(new Mem(Mem.Op.LD, reg, offsetReg));
-            }
+        //  Le registre de retour a déjà été réservé dans visitMain
+        Integer returnReg = returnRegisters.get(functionName);
+        if (returnReg == null) {
+            throw new RuntimeException("Registre de retour non trouvé pour : " + functionName);
         }
 
-        // Corps
+        // Charger les arguments depuis la pile
+        // Arguments empilés : arg0, arg1, arg2, ... (dans cet ordre)
+        // Donc à SP-nbArgs on a arg0, à SP-nbArgs+1 on a arg1, etc.
+        for (int i = 0; i < nbArgs; i++) {
+            String argName = ctx.VAR(i + 1).getText();
+
+            // Calculer l'offset depuis SP
+            int offset = nbArgs - i;
+
+            // Créer un registre temporaire pour l'adresse
+            int addrReg = newRegister();
+            program.addInstruction(new UALi(UALi.Op.SUB, addrReg, SP, offset));
+
+            // Charger l'argument dans un nouveau registre
+            int argReg = newRegister();
+            program.addInstruction(new Mem(Mem.Op.LD, argReg, addrReg));
+
+            // Associer la variable au registre
+            declareVar(argName, argReg);
+        }
+
+        // Corps de la fonction
         program.addInstructions(visitCore_fct(ctx.core_fct()));
 
         exitScope();
+        this.currentFunction = previousFunction;
+
+        return program;
+    }
+
+    @Override
+    public Program visitReturn(grammarTCLParser.ReturnContext ctx) {
+        Program program = new Program();
+
+        // Évaluer l'expression retournée
+        program.addInstructions(visit(ctx.expr()));
+        int resultReg = regCount - 1;
+
+        // Récupérer le registre de retour de la fonction actuelle
+        Integer returnReg = returnRegisters.get(currentFunction);
+
+        if (returnReg == null) {
+            throw new RuntimeException("Pas de registre de retour pour : " + currentFunction);
+        }
+
+        // Stocker le résultat dans le registre de retour
+        program.addInstruction(new UALi(UALi.Op.ADD, returnReg, resultReg, 0));
+
+        // Retour
+        program.addInstruction(new Ret());
+
+        return program;
+    }
+
+    @Override
+    public Program visitCore_fct(grammarTCLParser.Core_fctContext ctx) {
+        Program program = new Program();
+
+        // Instructions du corps
+        for (grammarTCLParser.InstrContext instrContext : ctx.instr()) {
+            program.addInstructions(visit(instrContext));
+        }
+
+        // S'il y a un return expr implicite à la fin
+        if (ctx.expr() != null) {
+            program.addInstructions(visit(ctx.expr()));
+            int resultReg = regCount - 1;
+
+            // Récupérer le registre de retour de la fonction actuelle
+            Integer returnReg = returnRegisters.get(currentFunction);
+
+            if (returnReg == null) {
+                throw new RuntimeException("Pas de registre de retour pour : " + currentFunction);
+            }
+
+            // Stocker le résultat dans le registre de retour
+            program.addInstruction(new UALi(UALi.Op.ADD, returnReg, resultReg, 0));
+
+            program.addInstruction(new Ret());
+        }
+
         return program;
     }
 
@@ -1085,30 +1142,45 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
         enterScope(); // Scope global
 
-        // Initialisation des registres
+        // Initialisation des registres système
         program.addInstruction(new UAL(UAL.Op.XOR, 0, 0, 0));
         program.addInstruction(new UALi(UALi.Op.ADD, 1, 0, 1));
         program.addInstruction(new UAL(UAL.Op.XOR, 2, 2, 2));
 
-        regCount = 3; // ✓ Réserver R0, R1, R2
+        regCount = 3; // Réserver R0, R1, R2
 
         // Appeler la fonction main
         program.addInstruction(new JumpCall(JumpCall.Op.CALL, "main"));
         program.addInstruction(new Stop());
 
-        // Label pour la fonction main
+        // === PREMIÈRE PASSE : Pré-enregistrer toutes les fonctions ===
+        // Réserver un registre de retour pour main
+        int mainReturnReg = newRegister();
+        returnRegisters.put("main", mainReturnReg);
+
+        // Pré-enregistrer toutes les autres fonctions
+        for (grammarTCLParser.Decl_fctContext decl : ctx.decl_fct()) {
+            String functionName = decl.VAR(0).getText();
+            int returnReg = newRegister();
+            returnRegisters.put(functionName, returnReg);
+        }
+
+        // === DEUXIÈME PASSE : Générer le code de main ===
         program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
         program.getInstructions().getLast().setLabel("main");
 
-        enterScope(); // Scope de main
+        enterScope();
+
+        String previousFunction = this.currentFunction;
+        this.currentFunction = "main";
 
         // Corps de main
         program.addInstructions(visitCore_fct(ctx.core_fct()));
-        // ✓ visitCore_fct a déjà ajouté le RET
 
-        exitScope(); // Fin scope de main
+        exitScope();
+        this.currentFunction = previousFunction;
 
-        // Générer le code pour toutes les déclarations de fonctions
+        // === TROISIÈME PASSE : Générer le code des autres fonctions ===
         for (grammarTCLParser.Decl_fctContext decl : ctx.decl_fct()) {
             program.addInstructions(visitDecl_fct(decl));
         }
@@ -1117,5 +1189,4 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
         return program;
     }
-
 }
