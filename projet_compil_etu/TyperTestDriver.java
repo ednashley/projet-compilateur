@@ -30,7 +30,7 @@ public class TyperTestDriver {
             if (a.equals("--show-preprocessed")) SHOW_PREPROCESSED = true;
         }
 
-        testProgram("test_ok.tcl");
+        testProgram("test_typage_ok.tcl");
         System.out.println("----------------------------------------");
     }
 
@@ -39,10 +39,11 @@ public class TyperTestDriver {
      * @param filename Le nom du fichier TCL à tester.
      */
     public static void testProgram(String filename) {
+        String path = System.getProperty("user.dir") + "\\projet_compil_etu\\Test\\" + filename;
         System.out.println("--- Test du fichier : " + filename + " ---");
         try {
             // Étape 1: Lecture et pré-traitement du source (convertir for(...) C-style -> grammaire)
-            String source = new String(Files.readAllBytes(Paths.get(filename)), StandardCharsets.UTF_8);
+            String source = new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8);
             String preprocessed = PREPROCESS ? preprocessSource(source) : source;
 
             if (SHOW_PREPROCESSED) {
@@ -52,21 +53,19 @@ public class TyperTestDriver {
             // Étape 2: Création du flux de caractères à partir de la source (pré-traitée si activée)
             CharStream input = CharStreams.fromString(preprocessed, filename);
 
-            // Étape 2: Création du Lexer (Analyseur Lexical)
+            // Étape 3: Création du Lexer (Analyseur Lexical)
             grammarTCLLexer lexer = new grammarTCLLexer(input);
 
-            // Étape 3: Création du flux de jetons
+            // Étape 4: Création du flux de jetons
             CommonTokenStream tokens = new CommonTokenStream(lexer);
 
-            // Étape 4: Création du Parser (Analyseur Syntaxique)
-
+            // Étape 5: Création du Parser (Analyseur Syntaxique)
             grammarTCLParser parser = new grammarTCLParser(tokens);
 
             parser.setErrorHandler(new BailErrorStrategy());
             parser.removeErrorListeners(); // Suppression des écouteurs par défaut (qui peuvent avaler l'erreur)
 
-
-            // Étape 5: Lancement du parsing pour obtenir l'AST
+            // Étape 6: Lancement du parsing pour obtenir l'AST
             ParseTree tree = parser.main();
 
             // Si le parsing a échoué (tree est null), on lève une erreur
@@ -74,11 +73,11 @@ public class TyperTestDriver {
                 throw new RuntimeException("Échec du parsing, l'arbre est null.");
             }
 
-            // Étape 6: Création et exécution du Visiteur de Typage
+            // Étape 7: Création et exécution du Visiteur de Typage
             TyperVisitor typerVisitor = new TyperVisitor();
             typerVisitor.visit(tree); // Lance le typage et l'unification
 
-            // Étape 7: Affichage des résultats pour un test VALIDE
+            // Étape 8: Affichage des résultats pour un test VALIDE
             System.out.println("Typage réussi !");
 
             // Affichage des UnknownType résolus (ex: alpha1 -> int)
@@ -93,13 +92,13 @@ public class TyperTestDriver {
         } catch (IOException e) {
             System.err.println("Erreur: Fichier " + filename + " non trouvé. " + e.getMessage());
         } catch (RuntimeException e) {
-            // Étape 8 : Capture de l'erreur pour un test INVALIDE
-            if (filename.equals("test_ok.tcl")) {
+            // Étape 9 : Capture de l'erreur pour un test INVALIDE
+            if (filename.equals("test_typage_ok.tcl")) {
                 System.out.println("Typage échoué (INATTENDU) !");
                 System.err.println("Erreur de type : " + e.getMessage());
                 // Afficher la pile d'appels pour diagnostic
                 e.printStackTrace(System.err);
-            } else if (filename.equals("test_erreur.tcl")) {
+            } else if (filename.equals("test_typage_erreur.tcl")) {
                 // Erreur attendue : on affiche uniquement le message concis, pas la pile
                 System.out.println("Typage échoué (ATTENDU) !");
                 System.err.println("Erreur de type : " + e.getMessage());
