@@ -74,6 +74,15 @@ public class CodeOptimizer {
         // Construction du graphe de contrôle
         buildControlGraph();
 
+        for(InstructionBlock block : blocks){
+            System.out.println("Bloc " + block.id + " : " + block.instructions);
+            System.out.print("Voisins : ");
+            for(InstructionBlock neighbor : controlGraph.getOutNeighbors(block)){
+                System.out.print(neighbor.id + " ");
+            }
+            System.out.println();
+        }
+
         return this.program;
     }
 
@@ -144,7 +153,18 @@ public class CodeOptimizer {
 
             // Cas 1 : C'est un saut simple
             if(lastInstruction instanceof JumpCall && labelToBlock.containsKey(((JumpCall) lastInstruction).getAddress())){
-                controlGraph.addEdge(block, labelToBlock.get(((JumpCall) lastInstruction).getAddress()));
+
+                // Sous-cas 1 : L'instruction est un CALL, on ajoute alors l'instruction suivante
+                if(lastInstruction.getName().equals(JumpCall.Op.CALL.toString())){
+                    if(i < blocks.size() - 1){
+                        controlGraph.addEdge(block, blocks.get(block.id + 1));
+                    }
+                }
+
+                // Sous-cas 2 : L'instruction est un JMP, on ajoute alors l'instruction correspondant au label fourni
+                else {
+                    controlGraph.addEdge(block, labelToBlock.get(((JumpCall) lastInstruction).getAddress()));
+                }
             }
 
             // Cas 2 : C'est un saut conditionnel
