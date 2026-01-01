@@ -74,14 +74,8 @@ public class CodeOptimizer {
         // Construction du graphe de contrôle
         buildControlGraph();
 
-        for(InstructionBlock block : blocks){
-            System.out.println("Bloc " + block.id + " : " + block.instructions);
-            System.out.print("Voisins : ");
-            for(InstructionBlock neighbor : controlGraph.getOutNeighbors(block)){
-                System.out.print(neighbor.id + " ");
-            }
-            System.out.println();
-        }
+        // Calcul des LVentry et des LVexit
+        computeLiveness();
 
         return this.program;
     }
@@ -186,4 +180,171 @@ public class CodeOptimizer {
             // Cas 4 : C'est une instruction d'arrêt (ne rien faire)
         }
     }
+
+    /**
+     * Calcule les LVentry et les LVexit de chaque bloc
+     *
+     */
+    private void computeLiveness(){
+        computeGenKill();
+
+        boolean changed = true;
+        while(changed){
+            changed = false;
+
+            // Parcours à l'envers pour optimiser le nombre d'itérations
+            for(int i = blocks.size() - 1; i >= 0; i--){
+                InstructionBlock block = blocks.get(i);
+
+                List<InstructionBlock> neighbors = controlGraph.getOutNeighbors(block);
+
+                // Calcul du LVexit avec la formule : LVexit(n) = Union(LVentry(s)) pour tous les successeurs s de n
+                Set<Integer> lvExit = new HashSet<>();
+                for(InstructionBlock neighbor : neighbors){
+                    lvExit.addAll(neighbor.lvEntry);
+                }
+
+                // Calcul du LVentry avec la formule : LVentry(n) = Gen(n) U (LVexit(n) - Kill(n))
+                Set<Integer> lvEntry = new HashSet<>();
+                for(InstructionBlock neighbor : neighbors){
+                    lvEntry.addAll(neighbor.gen);
+
+                    for(Integer exit : lvExit){
+                        if(!block.kill.contains(exit)){
+                            lvEntry.add(exit);
+                        }
+                    }
+                }
+
+                // Vérifie si le bloc a été modifié (si c'est le cas pour un bloc, on recalculera pour chaque bloc)
+                if(!block.lvExit.equals(lvExit) || !block.lvEntry.equals(lvEntry)){
+                    block.lvExit.addAll(lvExit);
+                    block.lvEntry.addAll(lvEntry);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    /**
+     * Calcule les variables générées et tuées de chaque bloc
+     *
+     */
+    private void computeGenKill(){
+        for(InstructionBlock block : blocks){
+            for(Instruction  instruction : block.instructions){
+                List<Integer> reads = getReadRegisters(instruction);
+                Integer write = getWrittenRegister(instruction);
+
+                for(Integer reg : reads){
+                    if(block.kill.contains(reg)){
+                        block.gen.add(reg);
+                    }
+                }
+
+                if(write != null){
+                    block.kill.add(write);
+                }
+            }
+        }
+    }
+
+    /**
+     * Permet de récupérer les registres lus dans une instruction
+     *
+     * @param instruction           L'instruction dans laquelle chercher les registres
+     * @return                      Les registres lus
+     */
+    private List<Integer> getReadRegisters(Instruction instruction){
+        List<Integer> readRegisters = new ArrayList<>();
+
+        // Cas 1 : L'instruction est une instruction UAL
+        if(instruction instanceof UAL ual){
+            readRegisters.add(ual.getSr1());
+            readRegisters.add(ual.getSr2());
+        }
+
+        // Cas 2 : L'instruction est une instruction UAL immédiate
+        else if(instruction instanceof UALi uali){
+            readRegisters.add(uali.getSr());
+        }
+
+        // Cas 3 : L'instruction est un saut conditionnel
+        else if(instruction instanceof CondJump condJump){
+            readRegisters.add(condJump.getSr1());
+            readRegisters.add(condJump.getSr2());
+        }
+
+        // Cas 4 : L'instruction est une instruction mémoire
+        else if(instruction instanceof Mem mem){
+
+            // Sous-cas 1 : L'instruction est un LD
+            if(mem.getName().equals(Mem.Op.LD.toString())){
+                readRegisters.add(mem.getAddress());
+            }
+
+            // Sous-cas 2 : L'instruction est un ST
+            else{
+                readRegisters.add(mem.getDest());
+                readRegisters.add(mem.getAddress());
+            }
+        }
+
+        // Cas 5 : L'instruction est une instruction d'entrée-sortie
+        else if(instruction instanceof IO io){
+
+            // Sous-cas 1 : L'instruction est un OUT ou un PRINT
+            if(io.getName().equals(IO.Op.OUT.toString()) || io.getName().equals(IO.Op.PRINT.toString())){
+                readRegisters.add(io.getReg());
+            }
+
+            // Sous-cas 2 : L'instruction est un IN ou un READ (ne rien faire)
+        }
+
+        return readRegisters;
+    }
+
+    /**
+     * Permet de récupérer le registre écrit dans une instruction
+     *
+     * @param instruction           L'instruction dans laquelle chercher le registre
+     * @return                      Le registre écrit
+     */
+    private Integer getWrittenRegister(Instruction instruction){
+        // Cas 1 : L'instruction est une instruction UAL
+        if(instruction instanceof UAL ual){
+            return ual.getDest();
+        }
+
+        // Cas 2 : L'instruction est une instruction UAL immédiate
+        else if(instruction instanceof UALi uali){
+            return uali.getDest();
+        }
+
+        // Cas 3 : L'instruction est une instruction mémoire
+        else if(instruction instanceof Mem mem){
+
+            // Sous-cas 1 : L'instruction est un LD
+            if(mem.getName().equals(Mem.Op.LD.toString())){
+                return mem.getDest();
+            }
+
+            // Sous-cas 2 : L'instruction est un ST (ne rien faire)
+        }
+
+        // Cas 4 : L'instruction est une instruction d'entrée-sortie
+        else if(instruction instanceof IO io){
+
+            // Sous-cas 1 : L'instruction est un IN ou un READ
+            if(io.getName().equals(IO.Op.IN.toString()) || io.getName().equals(IO.Op.READ.toString())){
+                return io.getReg();
+            }
+
+            // Sous-cas 2 : L'instruction est un OUT ou un PRINT (ne rien faire)
+        }
+
+        return null;
+    }
+
+
 }
