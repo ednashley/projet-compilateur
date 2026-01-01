@@ -36,6 +36,10 @@ public class Main {
 		CodeGenerator codeGen = new CodeGenerator(typer.getTypes());
 		Program program = codeGen.visit(tree);
 
+        // Optimisation de code
+        CodeOptimizer codeOpt = new CodeOptimizer(32);
+        program = codeOpt.optimize(program);
+
 		// Affichage du code linéaire
 		System.out.println("=== CODE LINEAIRE ===");
 		System.out.println(program);
