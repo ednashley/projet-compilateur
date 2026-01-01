@@ -9,7 +9,7 @@ import java.io.*;
 public class Main {
 	public static void main(String[] args) {
 		// Lire le fichier input.txt
-		String fichier = System.getProperty("user.dir") + "\\projet_compil_etu\\input";
+		String fichier = "projet_compil_etu\\input";
 		StringBuilder input = new StringBuilder();
 
 		try (BufferedReader br = new BufferedReader(new FileReader(fichier))) {
@@ -41,7 +41,7 @@ public class Main {
 		System.out.println(program);
 
 		//  écrire dans un fichier
-		try (FileWriter fw = new FileWriter("prog_lineaire.asm")) {
+		try (FileWriter fw = new FileWriter("projet_compil_etu\\prog_lineaire.asm")) {
 			fw.write(program.toString());
 		} catch (IOException e) {
 			System.out.println("Erreur écriture fichier : " + e.getMessage());

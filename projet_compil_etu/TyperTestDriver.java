@@ -39,7 +39,7 @@ public class TyperTestDriver {
      * @param filename Le nom du fichier TCL à tester.
      */
     public static void testProgram(String filename) {
-        String path = System.getProperty("user.dir") + "\\projet_compil_etu\\Test\\" + filename;
+        String path = "projet_compil_etu\\Test\\" + filename;
         System.out.println("--- Test du fichier : " + filename + " ---");
         try {
             // Étape 1: Lecture et pré-traitement du source (convertir for(...) C-style -> grammaire)
