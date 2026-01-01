@@ -22,10 +22,10 @@ public class CodeOptimizer {
 
         private ArrayList<Instruction> instructions = new ArrayList<>();
 
-        private Set<Integer> gen = new HashSet<>();
-        private Set<Integer> kill = new HashSet<>();
-        private Set<Integer> lvEntry = new HashSet<>();
-        private Set<Integer> lvExit = new HashSet<>();
+        private final Set<Integer> gen = new HashSet<>();
+        private final Set<Integer> kill = new HashSet<>();
+        private final Set<Integer> lvEntry = new HashSet<>();
+        private final Set<Integer> lvExit = new HashSet<>();
 
         /**
          * Constructeur du bloc d'instructions
@@ -205,14 +205,10 @@ public class CodeOptimizer {
                 }
 
                 // Calcul du LVentry avec la formule : LVentry(n) = Gen(n) U (LVexit(n) - Kill(n))
-                Set<Integer> lvEntry = new HashSet<>();
-                for(InstructionBlock neighbor : neighbors){
-                    lvEntry.addAll(neighbor.gen);
-
-                    for(Integer exit : lvExit){
-                        if(!block.kill.contains(exit)){
-                            lvEntry.add(exit);
-                        }
+                Set<Integer> lvEntry = new HashSet<>(block.gen);
+                for(Integer exit : lvExit){
+                    if(!block.kill.contains(exit)){
+                        lvEntry.add(exit);
                     }
                 }
 
@@ -237,7 +233,7 @@ public class CodeOptimizer {
                 Integer write = getWrittenRegister(instruction);
 
                 for(Integer reg : reads){
-                    if(block.kill.contains(reg)){
+                    if(!block.kill.contains(reg)){
                         block.gen.add(reg);
                     }
                 }
@@ -301,6 +297,9 @@ public class CodeOptimizer {
             // Sous-cas 2 : L'instruction est un IN ou un READ (ne rien faire)
         }
 
+        // On ne prend pas en compte les 3 registres réservés
+        readRegisters.removeIf(reg -> reg < 3);
+
         return readRegisters;
     }
 
@@ -311,14 +310,16 @@ public class CodeOptimizer {
      * @return                      Le registre écrit
      */
     private Integer getWrittenRegister(Instruction instruction){
+        Integer write = null;
+
         // Cas 1 : L'instruction est une instruction UAL
         if(instruction instanceof UAL ual){
-            return ual.getDest();
+            write = ual.getDest();
         }
 
         // Cas 2 : L'instruction est une instruction UAL immédiate
         else if(instruction instanceof UALi uali){
-            return uali.getDest();
+            write = uali.getDest();
         }
 
         // Cas 3 : L'instruction est une instruction mémoire
@@ -326,7 +327,7 @@ public class CodeOptimizer {
 
             // Sous-cas 1 : L'instruction est un LD
             if(mem.getName().equals(Mem.Op.LD.toString())){
-                return mem.getDest();
+                write = mem.getDest();
             }
 
             // Sous-cas 2 : L'instruction est un ST (ne rien faire)
@@ -337,13 +338,17 @@ public class CodeOptimizer {
 
             // Sous-cas 1 : L'instruction est un IN ou un READ
             if(io.getName().equals(IO.Op.IN.toString()) || io.getName().equals(IO.Op.READ.toString())){
-                return io.getReg();
+                write = io.getReg();
             }
 
             // Sous-cas 2 : L'instruction est un OUT ou un PRINT (ne rien faire)
         }
 
-        return null;
+        // On ne prend pas en compte les 3 registres réservés
+        if(write != null && write < 3){
+            return null;
+        }
+        return write;
     }
 
 
