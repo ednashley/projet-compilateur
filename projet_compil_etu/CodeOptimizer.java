@@ -81,29 +81,10 @@ public class CodeOptimizer {
         buildConflictGraph();
 
         // Coloration du graphe de conflit
-        conflictGraph.color();
+        int colorSize = conflictGraph.color();
 
-        /*
-        for(InstructionBlock block : blocks){
-            System.out.println("Bloc " + block.id + " : " + block.instructions);
-            System.out.print("Voisins : ");
-            for(InstructionBlock neighbor : controlGraph.getOutNeighbors(block)){
-                System.out.print(neighbor.id + " ");
-            }
-            System.out.println();
-            System.out.println("Gen : " + block.gen);
-            System.out.println("Kill : " + block.kill);
-            System.out.println("LVentry : " + block.lvEntry);
-            System.out.println("LVexit : " + block.lvExit);
-            System.out.println();
-        }
-        */
-
-        for(int i = 3; i < 30; i++){
-            if(conflictGraph.hasVertex(i)){
-                System.out.println("Reg R" + i + " -> " + conflictGraph.getColor(i));
-                System.out.println("Voisins : " + conflictGraph.getNeighbors(i));
-            }
+        if(colorSize <= nRegs - 3){
+            return applyAllocation();
         }
 
         return this.program;
@@ -440,5 +421,97 @@ public class CodeOptimizer {
                 }
             }
         }
+    }
+
+    /**
+     * Permet de récupérer le programme après l'échange des anciens registres par les nouveaux
+     *
+     * @return                                  Le programme final
+     * @throws IllegalArgumentException         Si une opération n'est pas reconnue dans le langage assembleur
+     */
+    private Program applyAllocation() throws IllegalArgumentException {
+        Program newProgram = new Program();
+
+        for (Instruction instruction : this.program.getInstructions()) {
+            Instruction newInstruction = instruction;
+
+            // Cas 1 : Instruction UAL
+            if (instruction instanceof UAL ual) {
+                newInstruction = new UAL(
+                        ual.getLabel(),
+                        UAL.Op.valueOf(ual.getName()),
+                        getPhysicalRegister(ual.getDest()),
+                        getPhysicalRegister(ual.getSr1()),
+                        getPhysicalRegister(ual.getSr2())
+                );
+            }
+
+            // Cas 2 : Instruction UAL immédiate
+            else if(instruction instanceof UALi uali){
+                newInstruction = new UALi(
+                        uali.getLabel(),
+                        UALi.Op.valueOf(uali.getName()),
+                        getPhysicalRegister(uali.getDest()),
+                        getPhysicalRegister(uali.getSr()),
+                        uali.getImm()
+                );
+            }
+
+            // Cas 3 : Instruction de saut conditionnel
+            else if(instruction instanceof CondJump condJump){
+                newInstruction = new CondJump(
+                        condJump.getLabel(),
+                        CondJump.Op.valueOf(condJump.getName()),
+                        getPhysicalRegister(condJump.getSr1()),
+                        getPhysicalRegister(condJump.getSr2()),
+                        condJump.getAddress()
+                );
+            }
+
+            // Cas 4 : Instruction mémoire
+            else if(instruction instanceof Mem mem){
+                newInstruction = new Mem(
+                        mem.getLabel(),
+                        Mem.Op.valueOf(mem.getName()),
+                        getPhysicalRegister(mem.getDest()),
+                        getPhysicalRegister(mem.getAddress())
+                );
+            }
+
+            // Cas 5 : Instruction IO
+            else if(instruction instanceof IO io){
+                newInstruction = new IO(
+                        io.getLabel(),
+                        IO.Op.valueOf(io.getName()),
+                        getPhysicalRegister(io.getReg())
+                );
+            }
+
+            // Cas 6 : Instructions sans registres (on ne fait rien)
+
+            // On ajoute la nouvelle instruction au nouveau programme
+            newProgram.addInstruction(newInstruction);
+        }
+
+        return newProgram;
+    }
+
+    /**
+     * Permet de récupérer le registre physique associé à un registre virtuel
+     *
+     * @param virtualRegister           Registre virtuel correspondant à l'ancien registre du programme linéaire
+     * @return                          Registre physique correspondant au nouveau registre après coloration
+     */
+    private int getPhysicalRegister(int virtualRegister){
+        if(virtualRegister < 3){
+            return virtualRegister;
+        }
+
+        int physicalRegister = conflictGraph.getColor(virtualRegister);
+        if(physicalRegister >= 0){
+            return physicalRegister + 3;
+        }
+
+        throw new RuntimeException("Registre R" + virtualRegister + " non alloué !");
     }
 }

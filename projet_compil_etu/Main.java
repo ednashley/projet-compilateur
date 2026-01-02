@@ -34,21 +34,36 @@ public class Main {
 
 		// Génération de code
 		CodeGenerator codeGen = new CodeGenerator(typer.getTypes());
-		Program program = codeGen.visit(tree);
+		Program linearProgram = codeGen.visit(tree);
 
         // Optimisation de code
         CodeOptimizer codeOpt = new CodeOptimizer(32);
-        program = codeOpt.optimize(program);
+        Program program = codeOpt.optimize(linearProgram);
 
 		// Affichage du code linéaire
-		System.out.println("=== CODE LINEAIRE ===");
-		System.out.println(program);
+		System.out.println("=== CODE LINÉAIRE ===");
+		System.out.println(linearProgram);
 
-		//  écrire dans un fichier
+        System.out.println();
+        System.out.println();
+        System.out.println();
+
+        // Affichage du code final
+        System.out.println("=== CODE FINAL ===");
+        System.out.println(program);
+
+		//  Écrire dans un fichier le programme linéaire
 		try (FileWriter fw = new FileWriter("projet_compil_etu\\prog_lineaire.asm")) {
-			fw.write(program.toString());
+			fw.write(linearProgram.toString());
 		} catch (IOException e) {
 			System.out.println("Erreur écriture fichier : " + e.getMessage());
 		}
+
+        //  Écrire dans un fichier le programme final
+        try (FileWriter fw = new FileWriter("projet_compil_etu\\prog.asm")) {
+            fw.write(program.toString());
+        } catch (IOException e) {
+            System.out.println("Erreur écriture fichier : " + e.getMessage());
+        }
 	}
 }
