@@ -10,6 +10,8 @@ import org.antlr.v4.runtime.tree.AbstractParseTreeVisitor;
 import Type.PrimitiveType;
 import Type.Type;
 import Type.UnknownType;
+import Type.ArrayType;
+
 
 
 
@@ -278,22 +280,19 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
     public Program visitEquality(grammarTCLParser.EqualityContext ctx) {
         Program program = new Program();
 
-        // Labels
         String trueLabel = newLabel("eq_true");
         String endLabel  = newLabel("eq_end");
 
-        // ✓ Évaluer l'expression gauche AVANT de créer resultReg
+        // Évaluer les deux expressions
         program.addInstructions(visit(ctx.expr(0)));
         int leftReg = regCount - 1;
 
-        // ✓ Évaluer l'expression droite
         program.addInstructions(visit(ctx.expr(1)));
         int rightReg = regCount - 1;
 
-        // ✓ Maintenant créer le registre résultat
         int resultReg = newRegister();
 
-        // Test == ou !=
+        // Test
         switch (ctx.getChild(1).getText()) {
             case "==" ->
                     program.addInstruction(
@@ -305,35 +304,22 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
                     );
         }
 
-        // Faux → result = 0
-        program.addInstruction(
-                new UAL(UAL.Op.XOR, resultReg, resultReg, resultReg)
-        );
+        // Cas FAUX
+        program.addInstruction(new UAL(UAL.Op.XOR, resultReg, resultReg, resultReg));
         program.addInstruction(new JumpCall(JumpCall.Op.JMP, endLabel));
 
-        // Vrai → result = 1
-        Program trueProg = new Program();
-        trueProg.addInstruction(
-                new UAL(UAL.Op.XOR, resultReg, resultReg, resultReg)
-        );
-        trueProg.addInstruction(
-                new UALi(UALi.Op.ADD, resultReg, resultReg, 1)
-        );
-        trueProg.getInstructions().getFirst().setLabel(trueLabel);
-        program.addInstructions(trueProg);
+        // Cas VRAI
+        program.addInstruction(new UAL(UAL.Op.XOR, resultReg, resultReg, resultReg));
+        program.getInstructions().getLast().setLabel(trueLabel);
 
-        // Fin
-        Program endProg = new Program();
-        endProg.addInstruction(
-                new UALi(UALi.Op.ADD, resultReg, resultReg, 0)
-        );
-        endProg.getInstructions().getFirst().setLabel(endLabel);
-        program.addInstructions(endProg);
+        program.addInstruction(new UALi(UALi.Op.ADD, resultReg, resultReg, 1));
+
+        // FIN
+        program.addInstruction(new UALi(UALi.Op.ADD, resultReg, resultReg, 0));
+        program.getInstructions().getLast().setLabel(endLabel);
 
         return program;
     }
-
-
     @Override
     public Program visitAddition(grammarTCLParser.AdditionContext ctx) {
         // expr + expr | expr - expr
@@ -419,11 +405,9 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         Program program = new Program();
 
         String varName = ctx.VAR().getText();
-
-        // ✓ Récupérer le registre de la variable
         Integer varReg = getVar(varName);
 
-        // ✓ Récupérer le type depuis la map fournie par le groupe 1
+        // Récupérer le type
         Type varType = null;
         for (Map.Entry<UnknownType, Type> entry : types.entrySet()) {
             if (entry.getKey().getVarName().equals(varName)) {
@@ -432,34 +416,31 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
             }
         }
 
-        // Si le type n'est pas trouvé, supposer que c'est un int
         if (varType == null) {
             varType = new PrimitiveType(PrimitiveType.Base.INT);
         }
 
-        // Vérifier si c'est un tableau
-        if (isArrayType(varType)) {
+        if (varType instanceof ArrayType) {
             program.addInstructions(printArray(varReg, varType));
         } else {
-            // ✓ TYPE PRIMITIF : print direct du registre
             program.addInstruction(new IO(IO.Op.PRINT, varReg));
         }
 
-        // ✓ AJOUTER UNE NOUVELLE LIGNE après chaque print
+        // Nouvelle ligne
         int newLineReg = newRegister();
-        program.addInstructions(setRegisterTo(newLineReg, 10)); // ASCII 10 = '\n'
+        program.addInstructions(setRegisterTo(newLineReg, 10));
         program.addInstruction(new IO(IO.Op.OUT, newLineReg));
 
         return program;
     }
 
 
+
     /**
      * Vérifie si un type est un tableau
      */
     private boolean isArrayType(Type type) {
-        // Adaptez selon votre hiérarchie de types
-        return type.toString().toLowerCase().contains("tab");
+        return type instanceof ArrayType;
     }
 
     /**
@@ -469,40 +450,36 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
     private Program printArray(int tabReg, Type arrayType) {
         Program program = new Program();
 
-        // 1. Charger la longueur du tableau (case 0)
+        // 1. Charger la longueur du tableau
         int lengthReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, lengthReg, tabReg));
 
-        // 2. Initialiser le compteur de boucle
+        // 2. Initialiser i = 0
         int iReg = newRegister();
-        program.addInstruction(new UAL(UAL.Op.XOR, iReg, iReg, iReg)); // i = 0
+        program.addInstruction(new UAL(UAL.Op.XOR, iReg, iReg, iReg));
 
-        // 3. Labels pour la boucle
         String loopLabel = newLabel("print_array_loop");
         String endLabel = newLabel("print_array_end");
 
-        // 4. Début de la boucle
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-        program.getInstructions().getLast().setLabel(loopLabel);
-
-        // 5. Condition : i >= length ? sortir
+        // DÉBUT DE BOUCLE
         program.addInstruction(new CondJump(CondJump.Op.JSEQ, iReg, lengthReg, endLabel));
+        program.getInstructions().getLast().setLabel(loopLabel);  // ✓ Label ici
 
-        // 6. Calculer l'adresse de l'élément : addr = tabReg + i + 1
+        // 6. Calculer l'adresse
         int addrReg = newRegister();
         program.addInstruction(new UAL(UAL.Op.ADD, addrReg, tabReg, iReg));
-        program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1)); // +1 car case 0 = longueur
+        program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1));
 
-        // 7. Charger la valeur : value = mem[addr]
+        // 7. Charger la valeur
         int valueReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, valueReg, addrReg));
 
         // 8. Afficher la valeur
         program.addInstruction(new IO(IO.Op.PRINT, valueReg));
 
-        // ✓ 9. Afficher un espace (ASCII 32)
+        // 9. Afficher un espace
         int spaceReg = newRegister();
-        program.addInstructions(setRegisterTo(spaceReg, 32)); // ASCII 32 = espace
+        program.addInstructions(setRegisterTo(spaceReg, 32));
         program.addInstruction(new IO(IO.Op.OUT, spaceReg));
 
         // 10. Incrémenter i
@@ -511,7 +488,7 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         // 11. Retour au début de la boucle
         program.addInstruction(new JumpCall(JumpCall.Op.JMP, loopLabel));
 
-        // 12. Fin de la boucle
+        // FIN DE BOUCLE
         program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
         program.getInstructions().getLast().setLabel(endLabel);
 
@@ -575,18 +552,11 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         int valueReg = regCount - 1;
 
         if (bracketsCount == 0) {
-            // ========================================
             // CAS 1 : Affectation variable simple
-            // x = 5;
-            // ========================================
             program.addInstruction(new UALi(UALi.Op.ADD, varReg, valueReg, 0));
 
         } else if (bracketsCount == 1) {
-            // ========================================
             // CAS 2 : Affectation tableau simple
-            // t[x] = 5;
-            // ========================================
-
             // Évaluer l'index
             program.addInstructions(visit(ctx.expr(0)));
             int indexReg = regCount - 1;
@@ -603,11 +573,7 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
             program.addInstruction(new Mem(Mem.Op.ST, valueReg, addrReg));
 
         } else {
-            // ========================================
             // CAS 3 : Tableaux multidimensionnels
-            // t[x][y] = 5; ou t[x][y][z] = 5;
-            // ========================================
-
             int currentReg = varReg;
 
             for (int i = 0; i < bracketsCount; i++) {
@@ -663,32 +629,27 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
         String okLabel = newLabel("array_size_ok");
         String endLabel = newLabel("resize_end");
+        String loopLabel = newLabel("init_loop");
+        String loopEndLabel = newLabel("init_end");
 
         // 1. Charger la longueur actuelle
         int lengthReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, lengthReg, tabReg));
 
-        // 2. Si index < length, OK
+        // 2. Si index < length, sauter au label OK
         program.addInstruction(new CondJump(CondJump.Op.JINF, indexReg, lengthReg, okLabel));
 
         // 3. Nouvelle longueur = index + 1
         int newLengthReg = newRegister();
         program.addInstruction(new UALi(UALi.Op.ADD, newLengthReg, indexReg, 1));
 
-        // 4. Boucle pour initialiser les nouvelles cases à 0
-        String loopLabel = newLabel("init_loop");
-        String loopEndLabel = newLabel("init_end");
-
-        // i = oldLength
+        // 4. Initialiser i = oldLength
         int iReg = newRegister();
         program.addInstruction(new UALi(UALi.Op.ADD, iReg, lengthReg, 0));
 
-        // Label début boucle
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-        program.getInstructions().getLast().setLabel(loopLabel);
-
-        // Condition : i >= newLength ? fin
+        // DÉBUT DE BOUCLE
         program.addInstruction(new CondJump(CondJump.Op.JSEQ, iReg, newLengthReg, loopEndLabel));
+        program.getInstructions().getLast().setLabel(loopLabel);  // ✓ Label sur JSEQ
 
         // Calculer adresse : tabReg + i + 1
         int addrReg = newRegister();
@@ -704,21 +665,19 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         program.addInstruction(new UALi(UALi.Op.ADD, iReg, iReg, 1));
         program.addInstruction(new JumpCall(JumpCall.Op.JMP, loopLabel));
 
-        // Fin boucle
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-        program.getInstructions().getLast().setLabel(loopEndLabel);
-
-        // 5. Mettre à jour la longueur
+        //  FIN DE BOUCLE
         program.addInstruction(new Mem(Mem.Op.ST, newLengthReg, tabReg));
+        program.getInstructions().getLast().setLabel(loopEndLabel);  // ✓ Label sur ST
 
+        // Sauter à la fin
         program.addInstruction(new JumpCall(JumpCall.Op.JMP, endLabel));
 
-        // Label OK
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        //  LABEL OK (tableau assez grand)
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));  // NOp
         program.getInstructions().getLast().setLabel(okLabel);
 
-        // Label fin
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        //  FIN
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));  // NOp
         program.getInstructions().getLast().setLabel(endLabel);
 
         return program;
@@ -733,36 +692,34 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         int condReg = regCount - 1;
 
         // Labels
-        String labelElseOrEnd = (ctx.instr().size() > 1) ? newLabel("Else_") : newLabel("EndIf_");
+        String labelElse = newLabel("Else_");
         String labelEnd = newLabel("EndIf_");
 
-        // Si condition fausse, sauter vers else ou fin
-        program.addInstruction(new CondJump(CondJump.Op.JEQU, condReg, 0, labelElseOrEnd));
+        // Si condition fausse, sauter vers else (ou fin s'il n'y a pas de else)
+        String jumpTarget = (ctx.instr().size() > 1) ? labelElse : labelEnd;
+        program.addInstruction(new CondJump(CondJump.Op.JEQU, condReg, 0, jumpTarget));
 
-        // Bloc vrai
+        //  BLOC VRAI
         program.addInstructions(visit(ctx.instr(0)));
 
-        if (ctx.instr().size() > 1) { // else présent
+        if (ctx.instr().size() > 1) {
+            // Il y a un else
             program.addInstruction(new JumpCall(JumpCall.Op.JMP, labelEnd));
 
-            // Bloc faux (else)
-            Program falseProg = visit(ctx.instr(1));
-            if (!falseProg.getInstructions().isEmpty())
-                falseProg.getInstructions().getFirst().setLabel(labelElseOrEnd);
-            program.addInstructions(falseProg);
+            // BLOC ELSE
+            program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+            program.getInstructions().getLast().setLabel(labelElse);
 
-            // Fin du if
-            Program endProg = new Program();
-            endProg.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-            endProg.getInstructions().getFirst().setLabel(labelEnd);
-            program.addInstructions(endProg);
+            program.addInstructions(visit(ctx.instr(1)));
+
+            //  FIN DU IF
+            program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+            program.getInstructions().getLast().setLabel(labelEnd);
 
         } else {
-            // Pas de else, mettre le label de fin
-            Program endProg = new Program();
-            endProg.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-            endProg.getInstructions().getFirst().setLabel(labelElseOrEnd);
-            program.addInstructions(endProg);
+            // Pas de else
+            program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+            program.getInstructions().getLast().setLabel(labelEnd);
         }
 
         return program;
@@ -771,35 +728,36 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
     public Program visitWhile(grammarTCLParser.WhileContext ctx) {
         Program program = new Program();
 
-        // Création des labels pour le début et la fin de la boucle
         String startLabel = newLabel("StartWhile");
         String endLabel = newLabel("EndWhile");
 
-        // Instruction factice pour le label de début
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-        program.getInstructions().getLast().setLabel(startLabel);
+        // Label sera placé sur la première vraie instruction (ADD, LD, etc.)
+        boolean labelPlaced = false;
 
         // Générer le code pour la condition
         Program conditionProgram = visit(ctx.expr());
-        program.addInstructions(conditionProgram);
 
-        // Registre contenant le résultat de la condition
+        for (Instruction instr : conditionProgram.getInstructions()) {
+            program.addInstruction(instr);
+            if (!labelPlaced) {
+                program.getInstructions().getLast().setLabel(startLabel);  // ✓ Label sur première instr
+                labelPlaced = true;
+            }
+        }
+
+        // Registre contenant le résultat
         int condReg = regCount - 1;
 
-        // Instruction factice pour comparer à 0
-        int zeroReg = newRegister();
-        program.addInstruction(new UALi(UALi.Op.ADD, zeroReg, 0, 0));
+        // Sauter à la fin si faux
+        program.addInstruction(new CondJump(CondJump.Op.JEQU, condReg, 0, endLabel));
 
-        // Sauter à la fin si la condition est fausse
-        program.addInstruction(new CondJump(CondJump.Op.JEQU, condReg, zeroReg, endLabel));
-
-        // Entrée dans le bloc de la boucle
+        // Corps
         program.addInstructions(visit(ctx.instr()));
 
-        // Retour au début de la boucle
+        // Retour
         program.addInstruction(new JumpCall(JumpCall.Op.JMP, startLabel));
 
-        // Instruction factice pour la fin de la boucle avec label
+        // Fin
         program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
         program.getInstructions().getLast().setLabel(endLabel);
 
@@ -813,42 +771,45 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         String startLabel = newLabel("Dbt_For");
         String endLabel = newLabel("Fin_For");
 
-        // Scope pour le for
         enterScope();
 
-        // --- Initialisation ---
+        // Initialisation
         program.addInstructions(visit(ctx.instr(0)));
 
-        //  Label de début AVANT la condition
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-        program.getInstructions().getLast().setLabel(startLabel);
+        // Label sur la première instruction de la condition
+        boolean labelPlaced = false;
+        Program condProgram = visit(ctx.expr());
 
-        // --- Condition (réévaluée à chaque itération) ---
-        program.addInstructions(visit(ctx.expr()));
+        for (Instruction instr : condProgram.getInstructions()) {
+            program.addInstruction(instr);
+            if (!labelPlaced) {
+                program.getInstructions().getLast().setLabel(startLabel);  // ✓ Label ici
+                labelPlaced = true;
+            }
+        }
+
         int condReg = regCount - 1;
 
         // Test condition
         program.addInstruction(new CondJump(CondJump.Op.JEQU, condReg, 0, endLabel));
 
-        // --- Corps ---
+        // Corps
         program.addInstructions(visit(ctx.instr(2)));
 
-        // --- Itération ---
+        // Itération
         program.addInstructions(visit(ctx.instr(1)));
 
-        // Retour au début
+        // Retour
         program.addInstruction(new JumpCall(JumpCall.Op.JMP, startLabel));
 
-        // Label de fin
+        // Fin
         program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
         program.getInstructions().getLast().setLabel(endLabel);
 
-        //  Sortir du scope
         exitScope();
 
         return program;
     }
-
     @Override
     public Program visitBlock(grammarTCLParser.BlockContext ctx) {
         Program program = new Program();
@@ -875,20 +836,20 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         // ✓ Créer un registre pour stocker l'adresse de début du tableau
         int tableAddrReg = newRegister();
 
-        // ✓ Sauvegarder l'adresse actuelle du heap (TP) dans tableAddrReg
+        //  Sauvegarder l'adresse actuelle du heap (TP) dans tableAddrReg
         program.addInstruction(new UALi(UALi.Op.ADD, tableAddrReg, this.TP, 0));
 
-        // ✓ Créer un registre pour la longueur
+        //  Créer un registre pour la longueur
         int lengthReg = newRegister();
         program.addInstructions(this.setRegisterTo(lengthReg, size));
 
-        // ✓ Stocker la longueur à l'adresse TP
+        //  Stocker la longueur à l'adresse TP
         program.addInstruction(new Mem(Mem.Op.ST, lengthReg, this.TP));
 
-        // ✓ Avancer TP de 1 pour pointer sur la première case de données
+        //  Avancer TP de 1 pour pointer sur la première case de données
         program.addInstruction(new UALi(UALi.Op.ADD, this.TP, this.TP, 1));
 
-        // ✓ Boucle sur toutes les expressions pour remplir le tableau
+        //  Boucle sur toutes les expressions pour remplir le tableau
         for (grammarTCLParser.ExprContext exprCtx : ctx.expr()) {
             program.addInstructions(visit(exprCtx));
             int exprReg = regCount - 1;
@@ -899,12 +860,7 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
             // Avancer TP de 1
             program.addInstruction(new UALi(UALi.Op.ADD, this.TP, this.TP, 1));
         }
-
-        // ✓ tableAddrReg contient maintenant l'adresse du tableau
-        // C'est le dernier registre alloué qui sera récupéré par regCount-1
-        // Mais attendez... tableAddrReg n'est plus regCount-1 !
-
-        // ✓ Solution : copier tableAddrReg dans un nouveau registre final
+        //  copier tableAddrReg dans un nouveau registre final
         int finalReg = newRegister();
         program.addInstruction(new UALi(UALi.Op.ADD, finalReg, tableAddrReg, 0));
 
@@ -972,42 +928,42 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         String functionName = ctx.VAR().getText();
         int nbArgs = ctx.expr().size();
 
-        // 1. Évaluer tous les arguments
+        //  Évaluer tous les arguments
         ArrayList<Integer> argRegisters = new ArrayList<>();
         for (int i = 0; i < nbArgs; i++) {
             program.addInstructions(visit(ctx.expr(i)));
             argRegisters.add(regCount - 1);
         }
 
-        // 2. Déterminer le dernier registre utilisé APRÈS évaluation des arguments
+        //  Déterminer le dernier registre utilisé APRÈS évaluation des arguments
         int lastUsedRegister = regCount - 1;
 
-        // 3. Si appel récursif : sauvegarder TOUS les registres actifs
+        //   sauvegarder TOUS les registres actifs
         //    (sauf le registre de retour qui sera écrasé)
         for (int i = this.startReg; i <= lastUsedRegister; i++) {
             program.addInstruction(new Mem(Mem.Op.ST, i, SP));
             program.addInstruction(new UALi(UALi.Op.ADD, SP, SP, 1));
         }
 
-        // 4. Empiler les arguments (UNE SEULE FOIS)
+        // Empiler les arguments (UNE SEULE FOIS)
         for (int reg : argRegisters) {
             program.addInstruction(new Mem(Mem.Op.ST, reg, SP));
             program.addInstruction(new UALi(UALi.Op.ADD, SP, SP, 1));
         }
 
-        // 5. Appel de la fonction
+        // Appel de la fonction
         program.addInstruction(new JumpCall(JumpCall.Op.CALL, functionName));
 
-        // 6. Récupérer le résultat dans un NOUVEAU registre
+        //  Récupérer le résultat dans un NOUVEAU registre
         int resultReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, resultReg, SP));
 
-        // 7. Dépiler les arguments
+        //  Dépiler les arguments
         if (nbArgs > 0) {
             program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, nbArgs));
         }
 
-        // 8. Si appel récursif : restaurer les registres dans l'ordre INVERSE
+        //  restaurer les registres dans l'ordre INVERSE
         for (int i = lastUsedRegister; i >= this.startReg; i--) {
             program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, 1));
             program.addInstruction(new Mem(Mem.Op.LD, i, SP));
@@ -1034,8 +990,6 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         int nbArgs = ctx.VAR().size() - 1;
 
         // Charger les arguments depuis la pile
-        // Arguments empilés : arg0, arg1, arg2, ... (dans cet ordre)
-        // Donc à SP-nbArgs on a arg0, à SP-nbArgs+1 on a arg1, etc.
         for (int i = 0; i < nbArgs; i++) {
             String argName = ctx.VAR(i + 1).getText();
 
@@ -1109,31 +1063,37 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
         enterScope(); // Scope global
 
-        // Initialisation des registres système
+        //  INITIALISATION DES REGISTRES SYSTÈME
         program.addInstruction(new UAL(UAL.Op.XOR, 0, 0, 0));
         program.addInstruction(new UALi(UALi.Op.ADD, 1, 0, 1));
         program.addInstruction(new UAL(UAL.Op.XOR, 2, 2, 2));
 
-        regCount = 3; // Réserver R0, R1, R2
+        regCount = 3;
 
-        // Appeler la fonction main
+        //  APPEL À MAIN
         program.addInstruction(new JumpCall(JumpCall.Op.CALL, "main"));
         program.addInstruction(new Stop());
 
-        // === PREMIÈRE PASSE : Générer le code de main ===
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-        program.getInstructions().getLast().setLabel("main");
-
         enterScope();
-
         this.startReg = regCount;
 
-        // Corps de main
-        program.addInstructions(visitCore_fct(ctx.core_fct()));
+        // Générer le corps de main
+        Program mainBody = visitCore_fct(ctx.core_fct());
+
+        // Attacher le label "main" à la première instruction du corps
+        if (!mainBody.getInstructions().isEmpty()) {
+            mainBody.getInstructions().getFirst().setLabel("main");
+        } else {
+            // Cas edge : corps vide, créer une NOp
+            program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+            program.getInstructions().getLast().setLabel("main");
+        }
+
+        program.addInstructions(mainBody);
 
         exitScope();
 
-        // === DEUXIÈME PASSE : Générer le code des autres fonctions ===
+        // GÉNÉRER LES AUTRES FONCTIONS
         for (grammarTCLParser.Decl_fctContext decl : ctx.decl_fct()) {
             program.addInstructions(visitDecl_fct(decl));
         }
