@@ -6,6 +6,8 @@ import java.util.*;
 
 // Classe publique de l'optimiseur de code assembleur pour ne pas dépasser le nombre de registres de la machine
 public class CodeOptimizer {
+    private static final int NB_RESERVED_REGS = 3;
+
     private int nRegs;
 
     private List<InstructionBlock> blocks;
@@ -83,7 +85,7 @@ public class CodeOptimizer {
         // Coloration du graphe de conflit
         int colorSize = conflictGraph.color();
 
-        if(colorSize <= nRegs - 3){
+        if(colorSize <= nRegs - NB_RESERVED_REGS){
             return applyAllocation();
         }
 
@@ -312,8 +314,8 @@ public class CodeOptimizer {
             // Sous-cas 2 : L'instruction est un IN ou un READ (ne rien faire)
         }
 
-        // On ne prend pas en compte les 3 registres réservés
-        readRegisters.removeIf(reg -> reg < 3);
+        // On ne prend pas en compte les NB_RESERVED_REGS registres réservés
+        readRegisters.removeIf(reg -> reg < NB_RESERVED_REGS);
 
         return readRegisters;
     }
@@ -359,8 +361,8 @@ public class CodeOptimizer {
             // Sous-cas 2 : L'instruction est un OUT ou un PRINT (ne rien faire)
         }
 
-        // On ne prend pas en compte les 3 registres réservés
-        if(write != null && write < 3){
+        // On ne prend pas en compte les NB_RESERVED_REGS registres réservés
+        if(write != null && write < NB_RESERVED_REGS){
             return null;
         }
         return write;
@@ -377,12 +379,12 @@ public class CodeOptimizer {
         for(InstructionBlock block : blocks){
             for(Instruction instruction : block.instructions){
                 Integer write = getWrittenRegister(instruction);
-                if(write != null && write >= 3){
+                if(write != null && write >= NB_RESERVED_REGS){
                     conflictGraph.addVertex(write);
                 }
 
                 for(Integer read : getReadRegisters(instruction)){
-                    if(read >= 3){
+                    if(read >= NB_RESERVED_REGS){
                         conflictGraph.addVertex(read);
                     }
                 }
@@ -400,7 +402,7 @@ public class CodeOptimizer {
                 Integer write = getWrittenRegister(instruction);
                 List<Integer> reads = getReadRegisters(instruction);
 
-                if(write != null && write >= 3){
+                if(write != null && write >= NB_RESERVED_REGS){
 
                     // On relie les registres en conflit
                     for(Integer liveReg : currentlyLive){
@@ -415,7 +417,7 @@ public class CodeOptimizer {
 
                 // Les instructions utilisées étaient vivantes avant cette instruction : on les ajoute
                 for(Integer read : reads){
-                    if(read >= 3){
+                    if(read >= NB_RESERVED_REGS){
                         currentlyLive.add(read);
                     }
                 }
@@ -503,13 +505,13 @@ public class CodeOptimizer {
      * @return                          Registre physique correspondant au nouveau registre après coloration
      */
     private int getPhysicalRegister(int virtualRegister){
-        if(virtualRegister < 3){
+        if(virtualRegister < NB_RESERVED_REGS){
             return virtualRegister;
         }
 
         int physicalRegister = conflictGraph.getColor(virtualRegister);
         if(physicalRegister >= 0){
-            return physicalRegister + 3;
+            return physicalRegister + NB_RESERVED_REGS;
         }
 
         throw new RuntimeException("Registre R" + virtualRegister + " non alloué !");
