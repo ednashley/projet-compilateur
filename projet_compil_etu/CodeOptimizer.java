@@ -77,6 +77,20 @@ public class CodeOptimizer {
         // Calcul des LVentry et des LVexit
         computeLiveness();
 
+        for(InstructionBlock block : blocks){
+            System.out.println("Bloc " + block.id + " : " + block.instructions);
+            System.out.print("Voisins : ");
+            for(InstructionBlock neighbor : controlGraph.getOutNeighbors(block)){
+                System.out.print(neighbor.id + " ");
+            }
+            System.out.println();
+            System.out.println("Gen : " + block.gen);
+            System.out.println("Kill : " + block.kill);
+            System.out.println("LVentry : " + block.lvEntry);
+            System.out.println("LVexit : " + block.lvExit);
+            System.out.println();
+        }
+
         return this.program;
     }
 
@@ -256,8 +270,13 @@ public class CodeOptimizer {
 
         // Cas 1 : L'instruction est une instruction UAL
         if(instruction instanceof UAL ual){
-            readRegisters.add(ual.getSr1());
-            readRegisters.add(ual.getSr2());
+
+            // L'opération XOR entre deux mêmes registres renvoie toujours 0 : c'est ce qui permet l'initialisation d'une variable, qui n'était donc pas vivante avant
+            if(!instruction.getName().equals(UAL.Op.XOR.toString()) || ual.getSr1() != ual.getSr2()){
+                readRegisters.add(ual.getSr1());
+                readRegisters.add(ual.getSr2());
+            }
+
         }
 
         // Cas 2 : L'instruction est une instruction UAL immédiate
