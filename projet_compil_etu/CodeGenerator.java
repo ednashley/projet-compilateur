@@ -16,13 +16,12 @@ import Type.UnknownType;
 public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements grammarTCLVisitor<Program> {
 
     private Map<UnknownType,Type> types;
-    private int regCount = 0; //compteur de registres
-    private int labelCount = 0; //compteur de labem
+    private int regCount; //compteur de registres
+    private int labelCount = 0; //compteur de label
     private final int SP = 2; //  stackPointeur pile
     private final int TP = 1; // heap / tableaux
     private Stack<Map<String, Integer>> scopeStack = new Stack<>(); // une pile de dictionnaires
-    private Map<String, Integer> returnRegisters = new HashMap<>();
-    private String currentFunction = "";
+    private int startReg = 3; // registre de départ de la fonction (permet d'avoir tous les registres d'une fonction)
 
 
 
@@ -973,12 +972,6 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         String functionName = ctx.VAR().getText();
         int nbArgs = ctx.expr().size();
 
-        // Récupérer le registre de retour de la fonction appelée
-        Integer returnRegister = returnRegisters.get(functionName);
-        if (returnRegister == null && !functionName.equals("main")) {
-            throw new RuntimeException("Fonction non déclarée : " + functionName);
-        }
-
         // 1. Évaluer tous les arguments
         ArrayList<Integer> argRegisters = new ArrayList<>();
         for (int i = 0; i < nbArgs; i++) {
@@ -991,11 +984,9 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
         // 3. Si appel récursif : sauvegarder TOUS les registres actifs
         //    (sauf le registre de retour qui sera écrasé)
-        if (functionName.equals(this.currentFunction) && returnRegister != null) {
-            for (int i = returnRegister + 1; i <= lastUsedRegister; i++) {
-                program.addInstruction(new Mem(Mem.Op.ST, i, SP));
-                program.addInstruction(new UALi(UALi.Op.ADD, SP, SP, 1));
-            }
+        for (int i = this.startReg; i <= lastUsedRegister; i++) {
+            program.addInstruction(new Mem(Mem.Op.ST, i, SP));
+            program.addInstruction(new UALi(UALi.Op.ADD, SP, SP, 1));
         }
 
         // 4. Empiler les arguments (UNE SEULE FOIS)
@@ -1007,23 +998,19 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         // 5. Appel de la fonction
         program.addInstruction(new JumpCall(JumpCall.Op.CALL, functionName));
 
-        // 6. Dépiler les arguments
+        // 6. Récupérer le résultat dans un NOUVEAU registre
+        int resultReg = newRegister();
+        program.addInstruction(new Mem(Mem.Op.LD, resultReg, SP));
+
+        // 7. Dépiler les arguments
         if (nbArgs > 0) {
             program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, nbArgs));
         }
 
-        // 7. Récupérer le résultat dans un NOUVEAU registre
-        int resultReg = newRegister();
-        if (returnRegister != null) {
-            program.addInstruction(new UALi(UALi.Op.ADD, resultReg, returnRegister, 0));
-        }
-
         // 8. Si appel récursif : restaurer les registres dans l'ordre INVERSE
-        if (functionName.equals(this.currentFunction) && returnRegister != null) {
-            for (int i = lastUsedRegister; i > returnRegister; i--) {
-                program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, 1));
-                program.addInstruction(new Mem(Mem.Op.LD, i, SP));
-            }
+        for (int i = lastUsedRegister; i >= this.startReg; i--) {
+            program.addInstruction(new UALi(UALi.Op.SUB, SP, SP, 1));
+            program.addInstruction(new Mem(Mem.Op.LD, i, SP));
         }
 
         return program;
@@ -1041,16 +1028,10 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
         enterScope();
 
-        String previousFunction = this.currentFunction;
-        this.currentFunction = functionName;
+        int oldStart = this.startReg;
+        this.startReg = regCount;
 
         int nbArgs = ctx.VAR().size() - 1;
-
-        //  Le registre de retour a déjà été réservé dans visitMain
-        Integer returnReg = returnRegisters.get(functionName);
-        if (returnReg == null) {
-            throw new RuntimeException("Registre de retour non trouvé pour : " + functionName);
-        }
 
         // Charger les arguments depuis la pile
         // Arguments empilés : arg0, arg1, arg2, ... (dans cet ordre)
@@ -1077,7 +1058,7 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         program.addInstructions(visitCore_fct(ctx.core_fct()));
 
         exitScope();
-        this.currentFunction = previousFunction;
+        this.startReg = oldStart;
 
         return program;
     }
@@ -1090,15 +1071,8 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         program.addInstructions(visit(ctx.expr()));
         int resultReg = regCount - 1;
 
-        // Récupérer le registre de retour de la fonction actuelle
-        Integer returnReg = returnRegisters.get(currentFunction);
-
-        if (returnReg == null) {
-            throw new RuntimeException("Pas de registre de retour pour : " + currentFunction);
-        }
-
         // Stocker le résultat dans le registre de retour
-        program.addInstruction(new UALi(UALi.Op.ADD, returnReg, resultReg, 0));
+        program.addInstruction(new Mem(Mem.Op.ST, resultReg, SP));
 
         // Retour
         program.addInstruction(new Ret());
@@ -1120,15 +1094,8 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
             program.addInstructions(visit(ctx.expr()));
             int resultReg = regCount - 1;
 
-            // Récupérer le registre de retour de la fonction actuelle
-            Integer returnReg = returnRegisters.get(currentFunction);
-
-            if (returnReg == null) {
-                throw new RuntimeException("Pas de registre de retour pour : " + currentFunction);
-            }
-
             // Stocker le résultat dans le registre de retour
-            program.addInstruction(new UALi(UALi.Op.ADD, returnReg, resultReg, 0));
+            program.addInstruction(new Mem(Mem.Op.ST, resultReg, SP));
 
             program.addInstruction(new Ret());
         }
@@ -1153,34 +1120,20 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         program.addInstruction(new JumpCall(JumpCall.Op.CALL, "main"));
         program.addInstruction(new Stop());
 
-        // === PREMIÈRE PASSE : Pré-enregistrer toutes les fonctions ===
-        // Réserver un registre de retour pour main
-        int mainReturnReg = newRegister();
-        returnRegisters.put("main", mainReturnReg);
-
-        // Pré-enregistrer toutes les autres fonctions
-        for (grammarTCLParser.Decl_fctContext decl : ctx.decl_fct()) {
-            String functionName = decl.VAR(0).getText();
-            int returnReg = newRegister();
-            returnRegisters.put(functionName, returnReg);
-        }
-
-        // === DEUXIÈME PASSE : Générer le code de main ===
+        // === PREMIÈRE PASSE : Générer le code de main ===
         program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
         program.getInstructions().getLast().setLabel("main");
 
         enterScope();
 
-        String previousFunction = this.currentFunction;
-        this.currentFunction = "main";
+        this.startReg = regCount;
 
         // Corps de main
         program.addInstructions(visitCore_fct(ctx.core_fct()));
 
         exitScope();
-        this.currentFunction = previousFunction;
 
-        // === TROISIÈME PASSE : Générer le code des autres fonctions ===
+        // === DEUXIÈME PASSE : Générer le code des autres fonctions ===
         for (grammarTCLParser.Decl_fctContext decl : ctx.decl_fct()) {
             program.addInstructions(visitDecl_fct(decl));
         }
