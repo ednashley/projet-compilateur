@@ -20,7 +20,7 @@ public class CodeOptimizer {
         private static int nbBlocks = 0;
         private final int id;
 
-        private ArrayList<Instruction> instructions = new ArrayList<>();
+        private final ArrayList<Instruction> instructions = new ArrayList<>();
 
         private final Set<Integer> gen = new HashSet<>();
         private final Set<Integer> kill = new HashSet<>();
@@ -77,6 +77,13 @@ public class CodeOptimizer {
         // Calcul des LVentry et des LVexit
         computeLiveness();
 
+        // Construction du graphe de conflit
+        buildConflictGraph();
+
+        // Coloration du graphe de conflit
+        conflictGraph.color();
+
+        /*
         for(InstructionBlock block : blocks){
             System.out.println("Bloc " + block.id + " : " + block.instructions);
             System.out.print("Voisins : ");
@@ -89,6 +96,14 @@ public class CodeOptimizer {
             System.out.println("LVentry : " + block.lvEntry);
             System.out.println("LVexit : " + block.lvExit);
             System.out.println();
+        }
+        */
+
+        for(int i = 3; i < 30; i++){
+            if(conflictGraph.hasVertex(i)){
+                System.out.println("Reg R" + i + " -> " + conflictGraph.getColor(i));
+                System.out.println("Voisins : " + conflictGraph.getNeighbors(i));
+            }
         }
 
         return this.program;
@@ -260,10 +275,10 @@ public class CodeOptimizer {
     }
 
     /**
-     * Permet de récupérer les registres lus dans une instruction
+     * Permet de récupérer les registres utilisés dans une instruction
      *
      * @param instruction           L'instruction dans laquelle chercher les registres
-     * @return                      Les registres lus
+     * @return                      Les registres utilisés
      */
     private List<Integer> getReadRegisters(Instruction instruction){
         List<Integer> readRegisters = new ArrayList<>();
@@ -323,10 +338,10 @@ public class CodeOptimizer {
     }
 
     /**
-     * Permet de récupérer le registre écrit dans une instruction
+     * Permet de récupérer le registre écrasé dans une instruction
      *
      * @param instruction           L'instruction dans laquelle chercher le registre
-     * @return                      Le registre écrit
+     * @return                      Le registre écrasé
      */
     private Integer getWrittenRegister(Instruction instruction){
         Integer write = null;
@@ -370,5 +385,60 @@ public class CodeOptimizer {
         return write;
     }
 
+    /**
+     * Construis le graphe de conflit des registres utilisés
+     *
+     */
+    private void buildConflictGraph(){
+        this.conflictGraph = new UnorientedGraph<Integer>();
 
+        // Étape 1 : Initialisation des sommets du graphe
+        for(InstructionBlock block : blocks){
+            for(Instruction instruction : block.instructions){
+                Integer write = getWrittenRegister(instruction);
+                if(write != null && write >= 3){
+                    conflictGraph.addVertex(write);
+                }
+
+                for(Integer read : getReadRegisters(instruction)){
+                    if(read >= 3){
+                        conflictGraph.addVertex(read);
+                    }
+                }
+            }
+        }
+
+        // Étape 2 : Construction des arêtes du graphe
+        for(InstructionBlock block : blocks) {
+            Set<Integer> currentlyLive = new HashSet<>(block.lvExit);
+
+            // On lit les instructions à l'envers
+            for(int i = block.instructions.size() - 1; i >= 0; i--){
+                Instruction instruction = block.instructions.get(i);
+
+                Integer write = getWrittenRegister(instruction);
+                List<Integer> reads = getReadRegisters(instruction);
+
+                if(write != null && write >= 3){
+
+                    // On relie les registres en conflit
+                    for(Integer liveReg : currentlyLive){
+                        if(!liveReg.equals(write)){
+                            conflictGraph.addEdge(write, liveReg);
+                        }
+                    }
+
+                    // Puisque l'on lit à l'envers, le registre n'était pas vivant avant : on l'enlève
+                    currentlyLive.remove(write);
+                }
+
+                // Les instructions utilisées étaient vivantes avant cette instruction : on les ajoute
+                for(Integer read : reads){
+                    if(read >= 3){
+                        currentlyLive.add(read);
+                    }
+                }
+            }
+        }
+    }
 }
