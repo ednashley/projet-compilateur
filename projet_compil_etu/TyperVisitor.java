@@ -578,11 +578,11 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
     public Type visitFor(grammarTCLParser.ForContext ctx) {
         // Rempli
         pushStage();
-        visit(ctx.instr(0));
-        Type tCond = visit(ctx.expr());
+        visit(ctx.instr(0)); // Initialisation
+        Type tCond = visit(ctx.expr()); // Condition
         unifyAndApply(tCond, BOOL_TYPE, ctx);
-        visit(ctx.instr(1));
-        visit(ctx.instr(2));
+        visit(ctx.instr(2)); // Corps de la boucle
+        visit(ctx.instr(1)); // Itération (après exécution du corps)
         popStage();
         return VOID_TYPE;
     }
