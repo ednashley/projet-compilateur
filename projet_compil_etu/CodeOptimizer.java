@@ -13,15 +13,15 @@ public class CodeOptimizer {
     // Nombre de registres utilisés
     private final int NB_REG_MAX;
 
+    // Registres temporaires pour les échanges si besoin
+    private final int TMP_REG_1;
+    private final int TMP_REG_2;
+
     // Pointeur de pile Spill
-    private static final int REG_SPILL_PTR = 29;
+    private final int REG_SPILL_PTR;
 
     // Adresse mémoire de départ pour le Spill
     private static final int START_SPILL_ADDR = 50000;
-
-    // Registres temporaires pour les échanges si besoin
-    private static final int TMP_REG_1 = 30;
-    private static final int TMP_REG_2 = 31;
 
     private List<InstructionBlock> blocks;
 
@@ -74,8 +74,14 @@ public class CodeOptimizer {
      * @param numberOfRegs      Nombre de registres de la machine
      */
     public CodeOptimizer(int numberOfRegs){
-        int END_REG = numberOfRegs - 4;
+        int nRegs = Math.max(6, numberOfRegs);
+        int END_REG = nRegs - 4;
         this.NB_REG_MAX = END_REG - START_REG + 1;
+
+        this.TMP_REG_1 = nRegs - 1;
+        this.TMP_REG_2 = nRegs - 2;
+
+        this.REG_SPILL_PTR = nRegs - 3;
 
         this.conflictGraph = new UnorientedGraph<Integer>();
     }
@@ -101,11 +107,7 @@ public class CodeOptimizer {
         // Coloration du graphe de conflit
         this.colorSize = conflictGraph.color();
 
-        if(this.colorSize <= NB_REG_MAX){
-            return applyAllocation();
-        }
-
-        return this.program;
+        return applyAllocation();
     }
 
     /**
