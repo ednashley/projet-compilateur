@@ -15,13 +15,13 @@ int main() {
     }
 
     int sum = 0;
-    for (int j = 0; j < 5; j = j + 1) {
+    for (int j = 0; , j < 5 , j = j + 1;) {
         sum = sum + j;
     }
     print(sum);
 
     int count = 0;
-    for (int k = 0; k < 3; k = k + 1) {
+    for (int k = 0; , k < 3 , k = k + 1;) {
         if (k > 0) {
             count = count + k;
         }
