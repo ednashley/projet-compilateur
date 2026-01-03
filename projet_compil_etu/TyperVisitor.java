@@ -663,6 +663,13 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
         return VOID_TYPE;
     }
 
+    public Map<String, Type> getEnvironment() {
 
-    
+        Map<String, Type> result = new HashMap<>();
+
+        if (!env.isEmpty()) {
+            result.putAll(env.get(0));
+        }
+        return result;
+    }
 }
