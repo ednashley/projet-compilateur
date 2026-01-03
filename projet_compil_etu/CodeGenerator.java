@@ -18,6 +18,8 @@ import Type.ArrayType;
 public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements grammarTCLVisitor<Program> {
 
     private Map<UnknownType,Type> types;
+    private Map<String, Type> varTypeMap;
+
     private int regCount; //compteur de registres
     private int labelCount = 0; //compteur de label
     private final int SP = 2; //  stackPointeur pile
@@ -31,8 +33,9 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
      * Constructeur
      * @param types types de chaque variable du code source
      */
-    public CodeGenerator(Map<UnknownType, Type> types) {
+    public CodeGenerator(Map<UnknownType, Type> types, Map<String, Type> varTypeMap) {
         this.types = types;
+        this.varTypeMap = varTypeMap;
         this.regCount = 3;
     }
 
@@ -79,6 +82,16 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
             }
         }
         throw new RuntimeException("Variable non déclarée : " + name);
+    }
+
+    private Type getVarType(String varName) {
+        Type t = varTypeMap.get(varName);
+        if (t == null) {
+            // Fallback : type inconnu, supposer INT
+            return new PrimitiveType(Type.Base.INT);
+        }
+        //  Appliquer les substitutions
+        return t.substituteAll(types);
     }
 
 
@@ -407,18 +420,8 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         String varName = ctx.VAR().getText();
         Integer varReg = getVar(varName);
 
-        // Récupérer le type
-        Type varType = null;
-        for (Map.Entry<UnknownType, Type> entry : types.entrySet()) {
-            if (entry.getKey().getVarName().equals(varName)) {
-                varType = entry.getValue();
-                break;
-            }
-        }
-
-        if (varType == null) {
-            varType = new PrimitiveType(PrimitiveType.Base.INT);
-        }
+        //  Utiliser getVarType() au lieu de boucler
+        Type varType = getVarType(varName);
 
         if (varType instanceof ArrayType) {
             program.addInstructions(printArray(varReg, varType));
@@ -434,61 +437,41 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         return program;
     }
 
-
-
-    /**
-     * Vérifie si un type est un tableau
-     */
     private boolean isArrayType(Type type) {
         return type instanceof ArrayType;
     }
 
-    /**
-     * Génère le code pour afficher un tableau
-     * AVEC UNE VRAIE BOUCLE EN ASSEMBLEUR
-     */
     private Program printArray(int tabReg, Type arrayType) {
         Program program = new Program();
 
-        // 1. Charger la longueur du tableau
         int lengthReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, lengthReg, tabReg));
 
-        // 2. Initialiser i = 0
         int iReg = newRegister();
         program.addInstruction(new UAL(UAL.Op.XOR, iReg, iReg, iReg));
 
         String loopLabel = newLabel("print_array_loop");
         String endLabel = newLabel("print_array_end");
 
-        // DÉBUT DE BOUCLE
         program.addInstruction(new CondJump(CondJump.Op.JSEQ, iReg, lengthReg, endLabel));
-        program.getInstructions().getLast().setLabel(loopLabel);  // ✓ Label ici
+        program.getInstructions().getLast().setLabel(loopLabel);
 
-        // 6. Calculer l'adresse
         int addrReg = newRegister();
         program.addInstruction(new UAL(UAL.Op.ADD, addrReg, tabReg, iReg));
         program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1));
 
-        // 7. Charger la valeur
         int valueReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, valueReg, addrReg));
 
-        // 8. Afficher la valeur
         program.addInstruction(new IO(IO.Op.PRINT, valueReg));
 
-        // 9. Afficher un espace
         int spaceReg = newRegister();
         program.addInstructions(setRegisterTo(spaceReg, 32));
         program.addInstruction(new IO(IO.Op.OUT, spaceReg));
 
-        // 10. Incrémenter i
         program.addInstruction(new UALi(UALi.Op.ADD, iReg, iReg, 1));
-
-        // 11. Retour au début de la boucle
         program.addInstruction(new JumpCall(JumpCall.Op.JMP, loopLabel));
 
-        // FIN DE BOUCLE
         program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
         program.getInstructions().getLast().setLabel(endLabel);
 
@@ -501,38 +484,26 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         String varName = ctx.VAR().getText();
 
         if (ctx.expr() != null) {
-            // Cas avec initialisation
             program.addInstructions(visit(ctx.expr()));
             int exprReg = regCount - 1;
             declareVar(varName, exprReg);
-
         } else {
-            // Cas sans initialisation
             int varRegister = newRegister();
             program.addInstruction(new UAL(UAL.Op.XOR, varRegister, varRegister, varRegister));
             declareVar(varName, varRegister);
 
-
-            // Si c'est un tableau, initialiser sa longueur à 0
-            Type varType = null;
-            for (Map.Entry<UnknownType, Type> entry : types.entrySet()) {
-                if (entry.getKey().getVarName().equals(varName)) {
-                    varType = entry.getValue();
-                    break;
-                }
-            }
+            //  CORRECTION : Utiliser getVarType()
+            Type varType = getVarType(varName);
 
             if (varType != null && isArrayType(varType)) {
                 int zeroReg = newRegister();
                 program.addInstruction(new UAL(UAL.Op.XOR, zeroReg, zeroReg, zeroReg));
                 program.addInstruction(new Mem(Mem.Op.ST, zeroReg, varRegister));
-                // mem[tabReg] = 0
             }
         }
 
         return program;
     }
-
 
     @Override
     public Program visitAssignment(grammarTCLParser.AssignmentContext ctx) {
