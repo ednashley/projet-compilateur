@@ -6,14 +6,29 @@ import java.util.*;
 
 // Classe publique de l'optimiseur de code assembleur pour ne pas dépasser le nombre de registres de la machine
 public class CodeOptimizer {
-    private static final int NB_RESERVED_REGS = 3;
 
-    private int nRegs;
+    // Numéro du premier registre disponible
+    private static final int START_REG = 3;
+
+    // Nombre de registres utilisés
+    private final int NB_REG_MAX;
+
+    // Pointeur de pile Spill
+    private static final int REG_SPILL_PTR = 29;
+
+    // Adresse mémoire de départ pour le Spill
+    private static final int START_SPILL_ADDR = 50000;
+
+    // Registres temporaires pour les échanges si besoin
+    private static final int TMP_REG_1 = 30;
+    private static final int TMP_REG_2 = 31;
 
     private List<InstructionBlock> blocks;
 
     private OrientedGraph<InstructionBlock> controlGraph;
     private UnorientedGraph<Integer> conflictGraph;
+
+    private int colorSize;
 
     private Program program;
 
@@ -59,7 +74,8 @@ public class CodeOptimizer {
      * @param numberOfRegs      Nombre de registres de la machine
      */
     public CodeOptimizer(int numberOfRegs){
-        this.nRegs = numberOfRegs;
+        int END_REG = numberOfRegs - 4;
+        this.NB_REG_MAX = END_REG - START_REG + 1;
 
         this.conflictGraph = new UnorientedGraph<Integer>();
     }
@@ -83,9 +99,9 @@ public class CodeOptimizer {
         buildConflictGraph();
 
         // Coloration du graphe de conflit
-        int colorSize = conflictGraph.color();
+        this.colorSize = conflictGraph.color();
 
-        if(colorSize <= nRegs - NB_RESERVED_REGS){
+        if(this.colorSize <= NB_REG_MAX){
             return applyAllocation();
         }
 
@@ -314,8 +330,8 @@ public class CodeOptimizer {
             // Sous-cas 2 : L'instruction est un IN ou un READ (ne rien faire)
         }
 
-        // On ne prend pas en compte les NB_RESERVED_REGS registres réservés
-        readRegisters.removeIf(reg -> reg < NB_RESERVED_REGS);
+        // On ne prend pas en compte les registres réservés
+        readRegisters.removeIf(reg -> reg < START_REG);
 
         return readRegisters;
     }
@@ -361,8 +377,8 @@ public class CodeOptimizer {
             // Sous-cas 2 : L'instruction est un OUT ou un PRINT (ne rien faire)
         }
 
-        // On ne prend pas en compte les NB_RESERVED_REGS registres réservés
-        if(write != null && write < NB_RESERVED_REGS){
+        // On ne prend pas en compte les registres réservés
+        if(write != null && write < START_REG){
             return null;
         }
         return write;
@@ -379,12 +395,12 @@ public class CodeOptimizer {
         for(InstructionBlock block : blocks){
             for(Instruction instruction : block.instructions){
                 Integer write = getWrittenRegister(instruction);
-                if(write != null && write >= NB_RESERVED_REGS){
+                if(write != null && write >= START_REG){
                     conflictGraph.addVertex(write);
                 }
 
                 for(Integer read : getReadRegisters(instruction)){
-                    if(read >= NB_RESERVED_REGS){
+                    if(read >= START_REG){
                         conflictGraph.addVertex(read);
                     }
                 }
@@ -402,7 +418,7 @@ public class CodeOptimizer {
                 Integer write = getWrittenRegister(instruction);
                 List<Integer> reads = getReadRegisters(instruction);
 
-                if(write != null && write >= NB_RESERVED_REGS){
+                if(write != null && write >= START_REG){
 
                     // On relie les registres en conflit
                     for(Integer liveReg : currentlyLive){
@@ -417,7 +433,7 @@ public class CodeOptimizer {
 
                 // Les instructions utilisées étaient vivantes avant cette instruction : on les ajoute
                 for(Integer read : reads){
-                    if(read >= NB_RESERVED_REGS){
+                    if(read >= START_REG){
                         currentlyLive.add(read);
                     }
                 }
@@ -434,65 +450,222 @@ public class CodeOptimizer {
     private Program applyAllocation() throws IllegalArgumentException {
         Program newProgram = new Program();
 
+        newProgram.addInstruction(new UAL(UAL.Op.XOR, REG_SPILL_PTR, REG_SPILL_PTR, REG_SPILL_PTR));
+        newProgram.addInstruction(new UALi(UALi.Op.ADD, REG_SPILL_PTR, REG_SPILL_PTR, START_SPILL_ADDR));
+
+        Set<String> functionLabels = new HashSet<>();
+
+        // On parcourt tout le programme pour trouver les labels des fonctions (des CALL)
+        for (Instruction instr : this.program.getInstructions()) {
+            if (instr instanceof JumpCall && instr.getName().equals(JumpCall.Op.CALL.toString())) {
+                functionLabels.add(((JumpCall) instr).getAddress());
+            }
+        }
+
+        // On récupère la taille du Spill
+        int spillSize = Math.max(0, colorSize - NB_REG_MAX);
+
         for (Instruction instruction : this.program.getInstructions()) {
-            Instruction newInstruction = instruction;
+
+            // Gestion de la pile
+            String label = instruction.getLabel();
+            if(label != null && functionLabels.contains(label) && spillSize > 0){
+
+                // La nouvelle instruction devient celle avec le label de la fonction
+                Instruction allocInstruction = new UALi(label, UALi.Op.ADD, REG_SPILL_PTR, REG_SPILL_PTR, spillSize);
+                instruction.setLabel("");
+                newProgram.addInstruction(allocInstruction);
+            }
+            if(instruction instanceof Ret && spillSize > 0){
+                newProgram.addInstruction(new UALi(UALi.Op.SUB, REG_SPILL_PTR, REG_SPILL_PTR, spillSize));
+            }
 
             // Cas 1 : Instruction UAL
             if (instruction instanceof UAL ual) {
-                newInstruction = new UAL(
+
+                // Registre Destination
+                int dest = getPhysicalRegister(ual.getDest());
+                dest = dest == -1 ? TMP_REG_1 : dest;
+
+                // Registre Source 1
+                int sr1 = getPhysicalRegister(ual.getSr1());
+                if(sr1 == -1){
+                    newProgram.addInstructions(loadSpill(ual.getSr1(), TMP_REG_1));
+                    sr1 = TMP_REG_1;
+                }
+
+                // Registre source 2
+                int sr2 = getPhysicalRegister(ual.getSr2());
+                if(sr2 == -1){
+                    newProgram.addInstructions(loadSpill(ual.getSr2(), TMP_REG_2));
+                    sr2 = TMP_REG_2;
+                }
+
+                // Instruction modifiée
+                newProgram.addInstruction(new UAL(
                         ual.getLabel(),
                         UAL.Op.valueOf(ual.getName()),
-                        getPhysicalRegister(ual.getDest()),
-                        getPhysicalRegister(ual.getSr1()),
-                        getPhysicalRegister(ual.getSr2())
-                );
+                        dest,
+                        sr1,
+                        sr2
+                ));
+
+                // Si dest était dans le Spill, on remet le résultat en mémoire
+                if(dest == TMP_REG_1){
+                    newProgram.addInstructions(storeSpill(ual.getDest(), TMP_REG_2, dest));
+                }
             }
 
             // Cas 2 : Instruction UAL immédiate
             else if(instruction instanceof UALi uali){
-                newInstruction = new UALi(
+
+                // Registre Destination
+                int dest = getPhysicalRegister(uali.getDest());
+                dest = dest == -1 ? TMP_REG_1 : dest;
+
+                // Registre Source
+                int sr = getPhysicalRegister(uali.getSr());
+                if(sr == -1){
+                    newProgram.addInstructions(loadSpill(uali.getSr(), TMP_REG_1));
+                    sr = TMP_REG_1;
+                }
+
+                // Instruction modifiée
+                newProgram.addInstruction(new UALi(
                         uali.getLabel(),
                         UALi.Op.valueOf(uali.getName()),
-                        getPhysicalRegister(uali.getDest()),
-                        getPhysicalRegister(uali.getSr()),
+                        dest,
+                        sr,
                         uali.getImm()
-                );
+                ));
+
+                // Si dest était dans le Spill, on remet le résultat en mémoire
+                if(dest == TMP_REG_1){
+                    newProgram.addInstructions(storeSpill(uali.getDest(), TMP_REG_2, dest));
+                }
             }
 
             // Cas 3 : Instruction de saut conditionnel
             else if(instruction instanceof CondJump condJump){
-                newInstruction = new CondJump(
+
+                // Registre Source 1
+                int sr1 = getPhysicalRegister(condJump.getSr1());
+                if(sr1 == -1){
+                    newProgram.addInstructions(loadSpill(condJump.getSr1(), TMP_REG_1));
+                    sr1 = TMP_REG_1;
+                }
+
+                // Registre source 2
+                int sr2 = getPhysicalRegister(condJump.getSr2());
+                if(sr2 == -1){
+                    newProgram.addInstructions(loadSpill(condJump.getSr2(), TMP_REG_2));
+                    sr2 = TMP_REG_2;
+                }
+
+                // Instruction modifiée
+                newProgram.addInstruction(new CondJump(
                         condJump.getLabel(),
                         CondJump.Op.valueOf(condJump.getName()),
-                        getPhysicalRegister(condJump.getSr1()),
-                        getPhysicalRegister(condJump.getSr2()),
+                        sr1,
+                        sr2,
                         condJump.getAddress()
-                );
+                ));
             }
 
-            // Cas 4 : Instruction mémoire
-            else if(instruction instanceof Mem mem){
-                newInstruction = new Mem(
+            // Cas 4 : Instruction mémoire : LD
+            else if(instruction instanceof Mem mem && instruction.getName().equals(Mem.Op.LD.toString())){
+
+                // Registre Destination
+                int dest = getPhysicalRegister(mem.getDest());
+                dest = dest == -1 ? TMP_REG_1 : dest;
+
+                // Registre Adresse
+                int addr = getPhysicalRegister(mem.getAddress());
+                if(addr == -1){
+                    newProgram.addInstructions(loadSpill(mem.getAddress(), TMP_REG_2));
+                    addr = TMP_REG_2;
+                }
+
+                // Instruction modifiée
+                newProgram.addInstruction(new Mem(
                         mem.getLabel(),
                         Mem.Op.valueOf(mem.getName()),
-                        getPhysicalRegister(mem.getDest()),
-                        getPhysicalRegister(mem.getAddress())
-                );
+                        dest,
+                        addr
+                ));
+
+                // Si dest était dans le Spill, on remet le résultat en mémoire
+                if(dest == TMP_REG_1){
+                    newProgram.addInstructions(storeSpill(mem.getDest(), TMP_REG_2, dest));
+                }
             }
 
-            // Cas 5 : Instruction IO
+            // Cas 5 : Instruction mémoire : ST
+            else if(instruction instanceof Mem mem && instruction.getName().equals(Mem.Op.ST.toString())){
+
+                // Registre Destination
+                int val = getPhysicalRegister(mem.getDest());
+                if(val == -1){
+                    newProgram.addInstructions(loadSpill(mem.getDest(), TMP_REG_1));
+                    val = TMP_REG_1;
+                }
+
+                // Registre Adresse
+                int addr = getPhysicalRegister(mem.getAddress());
+                if(addr == -1){
+                    newProgram.addInstructions(loadSpill(mem.getAddress(), TMP_REG_2));
+                    addr = TMP_REG_2;
+                }
+
+                // Instruction modifiée
+                newProgram.addInstruction(new Mem(
+                        mem.getLabel(),
+                        Mem.Op.valueOf(mem.getName()),
+                        val,
+                        addr
+                ));
+            }
+
+            // Cas 6 : Instruction IO
             else if(instruction instanceof IO io){
-                newInstruction = new IO(
-                        io.getLabel(),
-                        IO.Op.valueOf(io.getName()),
-                        getPhysicalRegister(io.getReg())
-                );
+                int reg = getPhysicalRegister(io.getReg());
+                String op = instruction.getName();
+
+                // Sous-cas 1 : Instructions OUT ou PRINT
+                if(op.equals(IO.Op.OUT.toString()) || op.equals(IO.Op.PRINT.toString())){
+                    if(reg == -1){
+                        newProgram.addInstructions(loadSpill(io.getReg(), TMP_REG_1));
+                        reg = TMP_REG_1;
+                    }
+                    newProgram.addInstruction(new IO(
+                            io.getLabel(),
+                            IO.Op.valueOf(io.getName()),
+                            reg
+                    ));
+                }
+
+                // Sous-cas 2 : Instructions IN ou READ
+                if(op.equals(IO.Op.IN.toString()) || op.equals(IO.Op.READ.toString())){
+                    if(reg == -1){
+                        reg = TMP_REG_1;
+                    }
+                    newProgram.addInstruction(new IO(
+                            io.getLabel(),
+                            IO.Op.valueOf(io.getName()),
+                            reg
+                    ));
+
+                    // Si reg était dans le Spill, on remet le résultat en mémoire
+                    if(reg == TMP_REG_1){
+                        newProgram.addInstructions(storeSpill(io.getReg(), TMP_REG_2, reg));
+                    }
+                }
             }
 
-            // Cas 6 : Instructions sans registres (on ne fait rien)
-
-            // On ajoute la nouvelle instruction au nouveau programme
-            newProgram.addInstruction(newInstruction);
+            // Cas 7 : Instructions sans registres
+            else{
+                newProgram.addInstruction(instruction);
+            }
         }
 
         return newProgram;
@@ -502,18 +675,63 @@ public class CodeOptimizer {
      * Permet de récupérer le registre physique associé à un registre virtuel
      *
      * @param virtualRegister           Registre virtuel correspondant à l'ancien registre du programme linéaire
-     * @return                          Registre physique correspondant au nouveau registre après coloration
+     * @return                          Registre physique correspondant au nouveau registre après coloration, -1 s'il dépasse le nombre de registres disponibles
      */
     private int getPhysicalRegister(int virtualRegister){
-        if(virtualRegister < NB_RESERVED_REGS){
+        if(virtualRegister < START_REG){
             return virtualRegister;
         }
 
         int physicalRegister = conflictGraph.getColor(virtualRegister);
         if(physicalRegister >= 0){
-            return physicalRegister + NB_RESERVED_REGS;
+            if(physicalRegister < NB_REG_MAX) {
+                return physicalRegister + START_REG;
+            } else{
+                return -1;
+            }
         }
 
         throw new RuntimeException("Registre R" + virtualRegister + " non alloué !");
+    }
+
+    /**
+     * Génère le code assembleur pour STORE un registre physique dans le Spill
+     *
+     * @param virtualRegister           Le registre virtuel à STORE
+     * @param regAddr                   Le registre dans lequel on souhaite stocker l'adresse
+     * @param regVal                    Le registre contenant la valeur à STORE
+     * @return                          Le programme qui permet de STORE le registre physique dans le Spill
+     */
+    private Program storeSpill(int virtualRegister, int regAddr, int regVal){
+        Program newProgram = new Program();
+
+        int color = conflictGraph.getColor(virtualRegister);
+        int offset = color - NB_REG_MAX + 1;
+
+        newProgram.addInstruction(new UALi(UALi.Op.SUB, regAddr, REG_SPILL_PTR, offset));
+
+        newProgram.addInstruction(new Mem(Mem.Op.ST, regVal, regAddr));
+
+        return newProgram;
+    }
+
+    /**
+     * Génère le code assembleur pour LOAD un registre physique du Spill
+     *
+     * @param virtualRegister           Le registre virtuel à LOAD
+     * @param regAddr                   Le registre dans lequel on souhaite stocker l'adresse
+     * @return                          Le programme qui permet de LOAD le registre physique dans le Spill
+     */
+    private Program loadSpill(int virtualRegister, int regAddr){
+        Program newProgram = new Program();
+
+        int color = conflictGraph.getColor(virtualRegister);
+        int offset = color - NB_REG_MAX + 1;
+
+        newProgram.addInstruction(new UALi(UALi.Op.SUB, regAddr, REG_SPILL_PTR, offset));
+
+        newProgram.addInstruction(new Mem(Mem.Op.LD, regAddr, regAddr));
+
+        return newProgram;
     }
 }
