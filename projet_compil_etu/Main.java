@@ -33,7 +33,7 @@ public class Main {
 		typer.visit(tree);
 
 		// Génération de code
-		CodeGenerator codeGen = new CodeGenerator(typer.getTypes());
+		CodeGenerator codeGen = new CodeGenerator (typer.getTypes(), typer.getEnvironment());
 		Program linearProgram = codeGen.visit(tree);
 
         // Optimisation de code
