@@ -415,6 +415,7 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
     @Override
     public Program visitPrint(grammarTCLParser.PrintContext ctx) {
+        // PRINT '(' VAR ')' SEMICOL
         Program program = new Program();
 
         String varName = ctx.VAR().getText();
@@ -441,39 +442,83 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
         return type instanceof ArrayType;
     }
 
-    private Program printArray(int tabReg, Type arrayType) {
+    private Program printArray(int tabReg) {
+        // Affichage simplifié - Exemple = 1 2 3 4 5
         Program program = new Program();
 
-        int lengthReg = newRegister();
-        program.addInstruction(new Mem(Mem.Op.LD, lengthReg, tabReg));
+        // Charger la longueur totale depuis le premier bloc
+        int totalLengthReg = newRegister();
+        program.addInstruction(new Mem(Mem.Op.LD, totalLengthReg, tabReg));
 
+        // Initialiser le compteur global i et le registre du bloc courant
         int iReg = newRegister();
-        program.addInstruction(new UAL(UAL.Op.XOR, iReg, iReg, iReg));
+        program.addInstruction(new UAL(UAL.Op.XOR, iReg, iReg, iReg)); // i = 0
 
+        int currentBlockReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, currentBlockReg, tabReg, 0)); // commencer au premier bloc
+
+        int posInBlockReg = newRegister();
+        program.addInstruction(new UAL(UAL.Op.XOR, posInBlockReg, posInBlockReg, posInBlockReg)); // posInBlock = 0
+
+        // Labels pour la boucle
         String loopLabel = newLabel("print_array_loop");
-        String endLabel = newLabel("print_array_end");
+        String loopEndLabel = newLabel("print_array_end");
 
-        program.addInstruction(new CondJump(CondJump.Op.JSEQ, iReg, lengthReg, endLabel));
+        // Début de la boucle
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
         program.getInstructions().getLast().setLabel(loopLabel);
 
+        // Condition : i >= totalLength ?
+        program.addInstruction(new CondJump(CondJump.Op.JSEQ, iReg, totalLengthReg, loopEndLabel));
+
+        // Passer au bloc suivant si posInBlock >= 10
+        String sameBlockLabel = newLabel("same_block");
+        int tenReg = newRegister();
+        program.addInstructions(setRegisterTo(tenReg, 10));
+        program.addInstruction(
+                new CondJump(CondJump.Op.JINF, posInBlockReg, tenReg, sameBlockLabel)
+        );
+
+        // -> Changer de bloc
+        // Calculer l'adresse du next pointer : currentBlock + 11
+        int nextPointerAddrReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, nextPointerAddrReg, currentBlockReg, 11));
+
+        // Charger l'adresse du prochain bloc
+        program.addInstruction(new Mem(Mem.Op.LD, currentBlockReg, nextPointerAddrReg)); // mem[next pointer]
+        program.addInstruction(new UAL(UAL.Op.XOR, posInBlockReg, posInBlockReg, posInBlockReg)); // reset posInBlock
+        program.addInstruction(new JumpCall(JumpCall.Op.JMP, sameBlockLabel));
+
+        // Label : rester dans le même bloc
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(sameBlockLabel);
+
+        // Lire la valeur : addr = currentBlock + 1 + posInBlock
         int addrReg = newRegister();
-        program.addInstruction(new UAL(UAL.Op.ADD, addrReg, tabReg, iReg));
+        program.addInstruction(new UAL(UAL.Op.ADD, addrReg, currentBlockReg, posInBlockReg));
         program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1));
 
         int valueReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, valueReg, addrReg));
 
+        // Afficher la valeur
         program.addInstruction(new IO(IO.Op.PRINT, valueReg));
 
+        // Afficher un espace
         int spaceReg = newRegister();
-        program.addInstructions(setRegisterTo(spaceReg, 32));
+        program.addInstructions(setRegisterTo(spaceReg, 32)); // ASCII 32 = espace
         program.addInstruction(new IO(IO.Op.OUT, spaceReg));
 
+        // Incrémenter i et posInBlock
         program.addInstruction(new UALi(UALi.Op.ADD, iReg, iReg, 1));
+        program.addInstruction(new UALi(UALi.Op.ADD, posInBlockReg, posInBlockReg, 1));
+
+        // Retour au début de la boucle
         program.addInstruction(new JumpCall(JumpCall.Op.JMP, loopLabel));
 
+        // Fin de la boucle
         program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
-        program.getInstructions().getLast().setLabel(endLabel);
+        program.getInstructions().getLast().setLabel(loopEndLabel);
 
         return program;
     }
@@ -481,24 +526,26 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
     public Program visitDeclaration(grammarTCLParser.DeclarationContext ctx) {
         Program program = new Program();
 
-        String varName = ctx.VAR().getText();
+        String varName = ctx.VAR().getText(); // nom de la variable
 
         if (ctx.expr() != null) {
-            program.addInstructions(visit(ctx.expr()));
-            int exprReg = regCount - 1;
-            declareVar(varName, exprReg);
+            // Cas : déclaration + initialisation
+            program.addInstructions(visit(ctx.expr()));      // évaluer l'expression
+            int exprReg = regCount - 1;                     // le résultat est dans le dernier registre
+            declareVar(varName, exprReg);                  // associer la variable au registre
         } else {
-            int varRegister = newRegister();
-            program.addInstruction(new UAL(UAL.Op.XOR, varRegister, varRegister, varRegister));
-            declareVar(varName, varRegister);
+            // Cas : déclaration sans initialisation
+            int varReg = newRegister();                    // créer un registre pour la variable
+            program.addInstruction(new UAL(UAL.Op.XOR, varReg, varReg, varReg)); // initialise à 0
+            declareVar(varName, varReg);                   // associer la variable au registre
 
-            //  CORRECTION : Utiliser getVarType()
             Type varType = getVarType(varName);
 
             if (varType != null && isArrayType(varType)) {
-                int zeroReg = newRegister();
-                program.addInstruction(new UAL(UAL.Op.XOR, zeroReg, zeroReg, zeroReg));
-                program.addInstruction(new Mem(Mem.Op.ST, zeroReg, varRegister));
+                // allouer un bloc de tableau vide (longueur 0)
+                program.addInstructions(allocateBlock());
+                int resultReg = regCount - 1;             // le dernier registre alloué est celui qui contient l'adresse du bloc
+                declareVar(varName, resultReg);           // associe la variable au registre contenant l'adresse
             }
         }
 
@@ -507,83 +554,43 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
     @Override
     public Program visitAssignment(grammarTCLParser.AssignmentContext ctx) {
-        // VAR ('[' expr ']')* ASSIGN expr SEMICOL
         Program program = new Program();
 
-        String varName = ctx.VAR().getText();
-        int varReg = getVar(varName);
+        String varName = ctx.VAR().getText();      // Nom de la variable
+        int varReg = getVar(varName);              // Récupérer le registre où se trouve le tableau ou la variable
 
-        // Nombre de paires de crochets : t[2][3] → 2 crochets
-        // ctx.expr().size() = nombre total d'expressions
-        // La dernière expression est la valeur à assigner
-        int bracketsCount = ctx.expr().size() - 1;
-
-        // Évaluer l'expression à droite (la valeur à assigner)
-        program.addInstructions(visit(ctx.expr(ctx.expr().size() - 1)));
+        // Récupérer la valeur à assigner (toujours la dernière expression)
+        int valueExprIndex = ctx.expr().size() - 1;
+        program.addInstructions(visit(ctx.expr(valueExprIndex)));
         int valueReg = regCount - 1;
 
-        if (bracketsCount == 0) {
-            // CAS 1 : Affectation variable simple
-            program.addInstruction(new UALi(UALi.Op.ADD, varReg, valueReg, 0));
-
-        } else if (bracketsCount == 1) {
-            // CAS 2 : Affectation tableau simple
-            // Évaluer l'index
+        // Cas 1 : Variable simple (pas de crochet)
+        if (ctx.expr().size() == 1) { // pas d'indice
+            program.addInstruction(new UALi(UALi.Op.ADD, varReg, valueReg, 0)); // var = value
+        }
+        // Cas 2 : Tableau simple (1D) t[i] = value
+        else if (ctx.expr().size() == 2) {
+            // Évaluer l'indice
             program.addInstructions(visit(ctx.expr(0)));
             int indexReg = regCount - 1;
 
             // Agrandir le tableau si nécessaire
             program.addInstructions(resizeArrayIfNeeded(varReg, indexReg));
 
-            // Calculer l'adresse : addr = varReg + indexReg + 1
+            // Calculer l'adresse de la case à remplir : addr = varReg + index + 1
             int addrReg = newRegister();
             program.addInstruction(new UAL(UAL.Op.ADD, addrReg, varReg, indexReg));
             program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1)); // +1 car case 0 = longueur
 
             // Stocker la valeur
             program.addInstruction(new Mem(Mem.Op.ST, valueReg, addrReg));
+        }
 
-        } else {
-            // CAS 3 : Tableaux multidimensionnels
-            int currentReg = varReg;
-
-            for (int i = 0; i < bracketsCount; i++) {
-                // Évaluer l'index à ce niveau
-                program.addInstructions(visit(ctx.expr(i)));
-                int indexReg = regCount - 1;
-
-                if (i < bracketsCount - 1) {
-                    // Pas encore au dernier niveau : charger le sous-tableau
-
-                    // Agrandir si nécessaire
-                    program.addInstructions(resizeArrayIfNeeded(currentReg, indexReg));
-
-                    // Calculer l'adresse
-                    int addrReg = newRegister();
-                    program.addInstruction(new UAL(UAL.Op.ADD, addrReg, currentReg, indexReg));
-                    program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1));
-
-                    // Charger le sous-tableau
-                    int subArrayReg = newRegister();
-                    program.addInstruction(new Mem(Mem.Op.LD, subArrayReg, addrReg));
-
-                    currentReg = subArrayReg;
-
-                } else {
-                    // Dernier niveau : affecter la valeur
-
-                    // Agrandir si nécessaire
-                    program.addInstructions(resizeArrayIfNeeded(currentReg, indexReg));
-
-                    // Calculer l'adresse finale
-                    int addrReg = newRegister();
-                    program.addInstruction(new UAL(UAL.Op.ADD, addrReg, currentReg, indexReg));
-                    program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1));
-
-                    // Stocker la valeur
-                    program.addInstruction(new Mem(Mem.Op.ST, valueReg, addrReg));
-                }
-            }
+        // Pour l'instant, pas de tableau multidimensionnel
+        else {
+            throw new UnsupportedOperationException(
+                    "Tableaux multidimensionnels non supportés dans cette version"
+            );
         }
 
         return program;
@@ -598,58 +605,135 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
     private Program resizeArrayIfNeeded(int tabReg, int indexReg) {
         Program program = new Program();
 
-        String okLabel = newLabel("array_size_ok");
-        String endLabel = newLabel("resize_end");
-        String loopLabel = newLabel("init_loop");
-        String loopEndLabel = newLabel("init_end");
+        // Labels
+        String noResizeLabel = newLabel("no_resize");
+        String resizeLoopLabel = newLabel("resize_loop");
+        String resizeEndLabel = newLabel("resize_end");
 
-        // 1. Charger la longueur actuelle
+        // Charger la longueur totale actuelle
         int lengthReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, lengthReg, tabReg));
+        // lengthReg = mem[firstBlock]
 
-        // 2. Si index < length, sauter au label OK
-        program.addInstruction(new CondJump(CondJump.Op.JINF, indexReg, lengthReg, okLabel));
+        // targetLength = index + 1
+        int targetLengthReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, targetLengthReg, indexReg, 1));
 
-        // 3. Nouvelle longueur = index + 1
-        int newLengthReg = newRegister();
-        program.addInstruction(new UALi(UALi.Op.ADD, newLengthReg, indexReg, 1));
+        // Si length >= targetLength → pas besoin d’agrandir
+        program.addInstruction(
+                new CondJump(CondJump.Op.JSEQ, lengthReg, targetLengthReg, noResizeLabel)
+        );
 
-        // 4. Initialiser i = oldLength
-        int iReg = newRegister();
-        program.addInstruction(new UALi(UALi.Op.ADD, iReg, lengthReg, 0));
+        // Trouver le dernier bloc
+        int currentBlockReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, currentBlockReg, tabReg, 0));
+        // currentBlock = firstBlock
 
-        // DÉBUT DE BOUCLE
-        program.addInstruction(new CondJump(CondJump.Op.JSEQ, iReg, newLengthReg, loopEndLabel));
-        program.getInstructions().getLast().setLabel(loopLabel);  // ✓ Label sur JSEQ
+        // blocks = length / 10
+        int blocksReg = newRegister(); //nombre de blocs à parcourir pour atteindre la bonne position
+        program.addInstruction(new UALi(UALi.Op.DIV, blocksReg, lengthReg, 10));
 
-        // Calculer adresse : tabReg + i + 1
-        int addrReg = newRegister();
-        program.addInstruction(new UAL(UAL.Op.ADD, addrReg, tabReg, iReg));
-        program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1));
+        int blockCounterReg = newRegister(); //nombre de blocs déjà parcourus
+        program.addInstruction(new UAL(UAL.Op.XOR, blockCounterReg, blockCounterReg, blockCounterReg));
 
-        // Stocker 0
+        String findBlockLoop = newLabel("find_block");
+        String findBlockEnd = newLabel("find_block_end");
+
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(findBlockLoop);
+
+        program.addInstruction(
+                new CondJump(CondJump.Op.JSEQ, blockCounterReg, blocksReg, findBlockEnd));
+        // Si on a déjà parcouru autant (ou plus) de blocs que nécessaire, on arrête la recherche du bloc et on sort de la boucle.
+
+        // currentBlock = mem[currentBlock + 11]
+        int nextAddrReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, nextAddrReg, currentBlockReg, 11));
+
+        int nextBlockReg = newRegister();
+        program.addInstruction(new Mem(Mem.Op.LD, nextBlockReg, nextAddrReg));
+
+        program.addInstruction(new UALi(UALi.Op.ADD, currentBlockReg, nextBlockReg, 0));
+        // on entre dans le nouveau bloc
+
+        program.addInstruction(new UALi(UALi.Op.ADD, blockCounterReg, blockCounterReg, 1)); //+1 nvx bloc parcouru
+        program.addInstruction(new JumpCall(JumpCall.Op.JMP, findBlockLoop));
+
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(findBlockEnd);
+
+        // posInBlock = length % 10
+        int posInBlockReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.MOD, posInBlockReg, lengthReg, 10));
+
+        // Boucle d’agrandissement
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(resizeLoopLabel);
+
+        program.addInstruction(
+                new CondJump(CondJump.Op.JSEQ, lengthReg, targetLengthReg, resizeEndLabel)
+        );
+
+        // Si posInBlock == 10 → nouveau bloc
+        String sameBlockLabel = newLabel("same_block");
+
+        // Registre temporaire pour posInBlock + 1
+        int posPlus1Reg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, posPlus1Reg, posInBlockReg, 1));
+
+        // Registre contenant la valeur 9
+        int nineReg = newRegister();
+        program.addInstructions(setRegisterTo(nineReg, 9));
+
+        // Comparer avec 9 : si posPlus1Reg <= 9 → même bloc
+        program.addInstruction(
+                new CondJump(CondJump.Op.JIEQ, posPlus1Reg, nineReg, sameBlockLabel));
+
+        // --- Nouveau bloc ---
+        Program allocProg = allocateBlock();
+        program.addInstructions(allocProg);
+        int newBlockReg = regCount - 1;
+
+        // mem[currentBlock + 11] = newBlock
+        int linkAddrReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, linkAddrReg, currentBlockReg, 11));
+        program.addInstruction(new Mem(Mem.Op.ST, newBlockReg, linkAddrReg));
+
+        program.addInstruction(new UALi(UALi.Op.ADD, currentBlockReg, newBlockReg, 0));
+
+        program.addInstruction(new UAL(UAL.Op.XOR, posInBlockReg, posInBlockReg, posInBlockReg));
+
+        program.addInstruction(new JumpCall(JumpCall.Op.JMP, sameBlockLabel));
+
+        // --- Même bloc ---
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(sameBlockLabel);
+
+        // mem[currentBlock + 1 + posInBlock] = 0
         int zeroReg = newRegister();
         program.addInstruction(new UAL(UAL.Op.XOR, zeroReg, zeroReg, zeroReg));
-        program.addInstruction(new Mem(Mem.Op.ST, zeroReg, addrReg));
 
-        // i++
-        program.addInstruction(new UALi(UALi.Op.ADD, iReg, iReg, 1));
-        program.addInstruction(new JumpCall(JumpCall.Op.JMP, loopLabel));
+        int dataAddrReg = newRegister();
+        program.addInstruction(new UAL(UAL.Op.ADD, dataAddrReg, currentBlockReg, posInBlockReg));
+        program.addInstruction(new UALi(UALi.Op.ADD, dataAddrReg, dataAddrReg, 1));
 
-        //  FIN DE BOUCLE
-        program.addInstruction(new Mem(Mem.Op.ST, newLengthReg, tabReg));
-        program.getInstructions().getLast().setLabel(loopEndLabel);  // ✓ Label sur ST
+        program.addInstruction(new Mem(Mem.Op.ST, zeroReg, dataAddrReg));
 
-        // Sauter à la fin
-        program.addInstruction(new JumpCall(JumpCall.Op.JMP, endLabel));
+        // posInBlock++, length++
+        program.addInstruction(new UALi(UALi.Op.ADD, posInBlockReg, posInBlockReg, 1));
+        program.addInstruction(new UALi(UALi.Op.ADD, lengthReg, lengthReg, 1));
 
-        //  LABEL OK (tableau assez grand)
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));  // NOp
-        program.getInstructions().getLast().setLabel(okLabel);
+        program.addInstruction(new JumpCall(JumpCall.Op.JMP, resizeLoopLabel));
 
-        //  FIN
-        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));  // NOp
-        program.getInstructions().getLast().setLabel(endLabel);
+        // Mise à jour de la longueur totale
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(resizeEndLabel);
+
+        program.addInstruction(new Mem(Mem.Op.ST, targetLengthReg, tabReg));
+
+        // Pas de resize
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(noResizeLabel);
 
         return program;
     }
@@ -800,68 +884,179 @@ public class CodeGenerator  extends AbstractParseTreeVisitor<Program> implements
 
     @Override
     public Program visitTab_initialization(grammarTCLParser.Tab_initializationContext ctx) {
+        // '{' (expr (',' expr)*)? '}'
         Program program = new Program();
 
-        int size = ctx.expr().size();
+        int totalElements = ctx.expr().size(); // nombre total d'éléments du tableau
+        int exprIndex = 0;                     // index pour parcourir les expressions
 
-        // ✓ Créer un registre pour stocker l'adresse de début du tableau
-        int tableAddrReg = newRegister();
+        // Allouer le premier bloc
+        program.addInstructions(allocateBlock());
+        int firstBlockReg = regCount - 1; // contient l'adresse du premier bloc
+        int currentBlockReg = firstBlockReg;   // registre pour remplir les blocs
 
-        //  Sauvegarder l'adresse actuelle du heap (TP) dans tableAddrReg
-        program.addInstruction(new UALi(UALi.Op.ADD, tableAddrReg, this.TP, 0));
-
-        //  Créer un registre pour la longueur
+        // Stocker la longueur totale dans le premier bloc (case 0)
         int lengthReg = newRegister();
-        program.addInstructions(this.setRegisterTo(lengthReg, size));
+        program.addInstructions(setRegisterTo(lengthReg, totalElements));
+        program.addInstruction(new Mem(Mem.Op.ST, lengthReg, currentBlockReg));
 
-        //  Stocker la longueur à l'adresse TP
-        program.addInstruction(new Mem(Mem.Op.ST, lengthReg, this.TP));
+        int elementsRemaining = totalElements;
 
-        //  Avancer TP de 1 pour pointer sur la première case de données
-        program.addInstruction(new UALi(UALi.Op.ADD, this.TP, this.TP, 1));
+        // Boucle sur les éléments
+        while (elementsRemaining > 0) {
+            // Combien d'éléments dans ce bloc ? Max 10
+            int len = Math.min(10, elementsRemaining);
 
-        //  Boucle sur toutes les expressions pour remplir le tableau
-        for (grammarTCLParser.ExprContext exprCtx : ctx.expr()) {
-            program.addInstructions(visit(exprCtx));
-            int exprReg = regCount - 1;
+            // Remplir les cases 1 à len
+            for (int i = 0; i < len; i++, exprIndex++) {
+                // Évaluer l'expression
+                program.addInstructions(visit(ctx.expr(exprIndex)));
+                int valueReg = regCount - 1;
 
-            // Stocker la valeur à l'adresse TP
-            program.addInstruction(new Mem(Mem.Op.ST, exprReg, this.TP));
+                // Calculer l'adresse : currentBlockReg + i + 1
+                int addrReg = newRegister();
+                program.addInstruction(new UAL(UAL.Op.ADD, addrReg, currentBlockReg, i));
+                program.addInstruction(new UALi(UALi.Op.ADD, addrReg, addrReg, 1));
 
-            // Avancer TP de 1
-            program.addInstruction(new UALi(UALi.Op.ADD, this.TP, this.TP, 1));
+                // Stocker la valeur
+                program.addInstruction(new Mem(Mem.Op.ST, valueReg, addrReg));
+            }
+
+            elementsRemaining -= len;
+
+            // Si des éléments restent, allouer un nouveau bloc et mettre next (case 11)
+            if (elementsRemaining > 0) {
+                program.addInstructions(allocateBlock());
+                int nextBlockReg = regCount - 1; // contient l'adresse du premier bloc
+
+                // Stocker l'adresse du nouveau bloc dans la case 11 (next)
+                int nextAddrReg = newRegister();
+                program.addInstruction(new UALi(UALi.Op.ADD, nextAddrReg, nextBlockReg, 0));
+
+                int nextPointerAddrReg = newRegister();
+                program.addInstruction(new UALi(UALi.Op.ADD, nextPointerAddrReg, currentBlockReg, 11));
+                program.addInstruction(new Mem(Mem.Op.ST, nextAddrReg, nextPointerAddrReg));
+
+                // Passer au nouveau bloc
+                currentBlockReg = nextBlockReg;
+            } else {
+                // Sinon, next = 0 (déjà fait dans allocateBlock)
+                break;
+            }
         }
-        //  copier tableAddrReg dans un nouveau registre final
+
+        // Copier l'adresse du premier bloc dans un registre final à renvoyer
         int finalReg = newRegister();
-        program.addInstruction(new UALi(UALi.Op.ADD, finalReg, tableAddrReg, 0));
+        program.addInstruction(new UALi(UALi.Op.ADD, finalReg, firstBlockReg, 0));
+
+        return program;
+    }
+
+    private Program allocateBlock() {
+        Program program = new Program();
+
+        // Réserver un registre pour l'adresse du bloc
+        int blockReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, blockReg, TP, 0)); // blockReg = TP (adresse du bloc)
+
+        // Initialiser la longueur du bloc à 0 (première case)
+        int zeroReg = newRegister();
+        program.addInstruction(new UAL(UAL.Op.XOR, zeroReg, zeroReg, zeroReg)); // zeroReg = 0
+        program.addInstruction(new Mem(Mem.Op.ST, zeroReg, TP));                // mem[TP] = 0
+        program.addInstruction(new UALi(UALi.Op.ADD, TP, TP, 1));              // TP++
+
+        // Initialiser les 10 cases de données à 0
+        for (int i = 0; i < 10; i++) {
+            int dataReg = newRegister();
+            program.addInstruction(new UAL(UAL.Op.XOR, dataReg, dataReg, dataReg)); // dataReg = 0
+            program.addInstruction(new Mem(Mem.Op.ST, dataReg, TP));                // mem[TP] = 0
+            program.addInstruction(new UALi(UALi.Op.ADD, TP, TP, 1));              // TP++
+        }
+
+        // Initialiser la 12ᵉ case (next pointer) à 0
+        int nextReg = newRegister();
+        program.addInstruction(new UAL(UAL.Op.XOR, nextReg, nextReg, nextReg));
+        program.addInstruction(new Mem(Mem.Op.ST, nextReg, TP)); // mem[TP] = 0
+        program.addInstruction(new UALi(UALi.Op.ADD, TP, TP, 1)); // TP++
+
+        // Copier blockReg dans un nouveau registre à renvoyer
+        int resultReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, resultReg, blockReg, 0));
 
         return program;
     }
 
     @Override
     public Program visitTab_access(grammarTCLParser.Tab_accessContext ctx) {
+        // expr '[' expr ']'
         Program program = new Program();
 
-        // Récupérer registre du tableau
-        Program tabProg = visit(ctx.expr(0));  // l'expression t
+        // Récupérer le registre du tableau
+        Program tabProg = visit(ctx.expr(0)); // expression t
         program.addInstructions(tabProg);
-        int tabReg = regCount - 1;
+        int firstBlockReg = regCount - 1; // contient l'adresse du premier bloc
 
-        // Récupérer registre de l'indice
-        Program indexProg = visit(ctx.expr(1)); // l'expression i
+        // Récupérer l'indice
+        Program indexProg = visit(ctx.expr(1)); // expression i
         program.addInstructions(indexProg);
-        int indexReg = regCount - 1;
+        int indexReg = regCount - 1; // indice global
 
-        // Registre pour la longueur
-        int lengthReg = newRegister();
-        program.addInstruction(new Mem(Mem.Op.LD, lengthReg, tabReg)); // longueur = tab[0]
+        // Charger la longueur totale du tableau
+        int totalLengthReg = newRegister();
+        program.addInstruction(new Mem(Mem.Op.LD, totalLengthReg, firstBlockReg));
 
-        // Registre pour l'adresse de l'élément tab[i]
+        // S'assurer que l'indice est < longueur totale
+        String inBoundsLabel = newLabel("tab_access_ok");
+        program.addInstruction(new CondJump(CondJump.Op.JINF, indexReg, totalLengthReg, inBoundsLabel));
+
+        // sinon → SegDefault
+        // on fait un STOP pour "crash"
+        program.addInstruction(new Stop());
+
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(inBoundsLabel);
+
+        // Trouver le bloc contenant l'élément
+        int currentBlockReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, currentBlockReg, firstBlockReg, 0));
+
+        int blockCounterReg = newRegister();
+        program.addInstruction(new UAL(UAL.Op.XOR, blockCounterReg, blockCounterReg, blockCounterReg)); // compteur de blocs
+
+        int tenReg = newRegister();
+        program.addInstructions(setRegisterTo(tenReg, 10));
+
+        String blockLoopLabel = newLabel("tab_block_loop");
+        String blockLoopEndLabel = newLabel("tab_block_loop_end");
+
+        // Boucle blocklooplabel : index >= 10 ? aller au bloc suivant
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(blockLoopLabel);
+
+        program.addInstruction(new CondJump(CondJump.Op.JINF, indexReg, tenReg, blockLoopEndLabel));
+        // si index < 10 -> fin boucle
+
+        // Passer au bloc suivant : currentBlockReg = mem[currentBlockReg + 11]
+        int nextBlockAddrReg = newRegister();
+        program.addInstruction(new UALi(UALi.Op.ADD, nextBlockAddrReg, currentBlockReg, 11));
+        program.addInstruction(new Mem(Mem.Op.LD, currentBlockReg, nextBlockAddrReg));
+
+        // Décrémenter l'indice global : indexReg -= 10
+        program.addInstruction(new UAL(UAL.Op.SUB, indexReg, indexReg, tenReg));
+
+        // Retour au début de la boucle
+        program.addInstruction(new JumpCall(JumpCall.Op.JMP, blockLoopLabel));
+
+        // Fin de la boucle
+        program.addInstruction(new UALi(UALi.Op.ADD, 0, 0, 0));
+        program.getInstructions().getLast().setLabel(blockLoopEndLabel);
+
+        // Calculer l'adresse finale de l'élément dans le bloc
         int elementAddrReg = newRegister();
-        program.addInstruction(new UAL(UAL.Op.ADD, elementAddrReg, tabReg, indexReg));
-        program.addInstruction(new UALi(UALi.Op.ADD, elementAddrReg, elementAddrReg, 1)); // +1 car case 0 = longueur
+        program.addInstruction(new UALi(UALi.Op.ADD, elementAddrReg, currentBlockReg, 1)); // +1 car case 0 = longueur locale
+        program.addInstruction(new UAL(UAL.Op.ADD, elementAddrReg, elementAddrReg, indexReg));
 
-        // Charger la valeur dans un nouveau registre
+        // Charger la valeur
         int valueReg = newRegister();
         program.addInstruction(new Mem(Mem.Op.LD, valueReg, elementAddrReg));
 
