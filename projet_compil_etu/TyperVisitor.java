@@ -37,8 +37,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      * Empile l'étape actuelle
      */
     private void pushStage() {
-        // Push a new empty scope so declarations in the new stage
-        // don't conflict with names from outer scopes (shadowing allowed).
         env.push(new HashMap<>());
     }
 
@@ -124,7 +122,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitNegation(grammarTCLParser.NegationContext ctx) {
-        // Rempli
         Type t = visit(ctx.expr());
         unifyAndApply(t, BOOL_TYPE, ctx);
         return BOOL_TYPE;
@@ -137,7 +134,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitComparison(grammarTCLParser.ComparisonContext ctx) {
-        // Rempli
         Type t1 = visit(ctx.expr(0));
         Type t2 = visit(ctx.expr(1));
 
@@ -154,7 +150,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitOr(grammarTCLParser.OrContext ctx) {
-        // Rempli
         Type t1 = visit(ctx.expr(0));
         Type t2 = visit(ctx.expr(1));
         unifyAndApply(t1, BOOL_TYPE, ctx);
@@ -169,7 +164,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitOpposite(grammarTCLParser.OppositeContext ctx) {
-        // Rempli
         Type t = visit(ctx.expr());
         unifyAndApply(t, INT_TYPE, ctx);
         return INT_TYPE;
@@ -183,7 +177,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitInteger(grammarTCLParser.IntegerContext ctx) {
-        // Rempli
         return INT_TYPE;
     }
 
@@ -196,7 +189,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitTab_access(grammarTCLParser.Tab_accessContext ctx) {
-        // Rempli
         Type tVar = visit(ctx.expr(0));
         Type tIndex = visit(ctx.expr(1));
 
@@ -217,8 +209,7 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitBrackets(grammarTCLParser.BracketsContext ctx) {
-        // Rempli
-        // Parenthèses: retourner simplement le type de l'expression interne
+        // Parenthèses: retourner le type de l'expression interne
         Type inner = visit(ctx.expr());
         return inner.substituteAll(this.types);
     }
@@ -231,7 +222,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitCall(grammarTCLParser.CallContext ctx) {
-        // Rempli
         String fctName = ctx.VAR().getText();
         Type tFct = lookup(fctName);
 
@@ -239,8 +229,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
             throw new RuntimeException("Type Error: L'identifiant " + fctName + " n'est pas une fonction.");
         }
 
-        // Instantiate a fresh copy of the function type so that generic UnknownType
-        // variables are fresh per call (let-polymorphism-ish behavior).
         FunctionType signature = (FunctionType) instantiateType(tFct, new HashMap<UnknownType,UnknownType>());
 
         List<grammarTCLParser.ExprContext> callArgs = ctx.expr();
@@ -249,7 +237,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
             throw new RuntimeException("Type Error: Nombre d'arguments incorrect pour " + fctName);
         }
 
-        // L'itération est correcte ici car callArgs est une liste de ExprContext
         for (int i = 0; i < callArgs.size(); i++) {
             Type expectedArgType = signature.getArgsType(i);
             // callArgs.get(i) est un ExprContext
@@ -265,8 +252,8 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
     }
 
     /**
-     * Instantiate a type by replacing each UnknownType occurrence with a fresh UnknownType.
-     * Uses a mapping to keep consistent replacements within the same instantiation.
+     * Instancie un type en remplaçant chaque occurrence de UnknownType par une nouvelle instance de UnknownType.
+     * Utilise un map pour assurer la cohérence des remplacements au sein d'une même instance.
      */
     private Type instantiateType(Type t, Map<UnknownType, UnknownType> mapping) {
         if (t instanceof UnknownType) {
@@ -300,7 +287,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitBoolean(grammarTCLParser.BooleanContext ctx) {
-        // Rempli
         return BOOL_TYPE;
     }
 
@@ -311,7 +297,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitAnd(grammarTCLParser.AndContext ctx) {
-        // Rempli
         Type t1 = visit(ctx.expr(0));
         Type t2 = visit(ctx.expr(1));
         unifyAndApply(t1, BOOL_TYPE, ctx);
@@ -326,7 +311,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitVariable(grammarTCLParser.VariableContext ctx) {
-        // Rempli
         String id = ctx.VAR().getText();
         Type variableType = lookup(id);
         return variableType.substituteAll(types);
@@ -339,7 +323,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitMultiplication(grammarTCLParser.MultiplicationContext ctx) {
-        // Rempli
         Type t1 = visit(ctx.expr(0));
         Type t2 = visit(ctx.expr(1));
 
@@ -356,7 +339,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitEquality(grammarTCLParser.EqualityContext ctx) {
-        // Rempli
         Type t1 = visit(ctx.expr(0));
         Type t2 = visit(ctx.expr(1));
 
@@ -394,7 +376,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitAddition(grammarTCLParser.AdditionContext ctx) {
-        // Rempli
         Type t1 = visit(ctx.expr(0));
         Type t2 = visit(ctx.expr(1));
 
@@ -411,7 +392,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitBase_type(grammarTCLParser.Base_typeContext ctx) {
-        // Rempli
         String typeKeyword = ctx.getChild(0).getText();
         if (typeKeyword.equals("int")) {
             return INT_TYPE;
@@ -432,7 +412,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitTab_type(grammarTCLParser.Tab_typeContext ctx) {
-        // Rempli
         Type elementType = visit(ctx.type());
         return new ArrayType(elementType);
     }
@@ -445,13 +424,12 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitDeclaration(grammarTCLParser.DeclarationContext ctx) {
-        // Rempli
         String varName = ctx.VAR().getText();
         Type tDeclared = visit(ctx.type());
 
         // Utilisation de la seule méthode ctx.expr() disponible
         if (ctx.expr() != null) {
-            Type tExpr = visit(ctx.expr()); // <-- Crash ici, mais compile
+            Type tExpr = visit(ctx.expr());
             unifyAndApply(tDeclared, tExpr, ctx);
         }
 
@@ -468,7 +446,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitPrint(grammarTCLParser.PrintContext ctx) {
-        // Rempli
         // Le token à l'intérieur de print(...) est un VAR selon la grammaire
         String varName = ctx.VAR().getText();
         Type tExpr = lookup(varName);
@@ -482,7 +459,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitAssignment(grammarTCLParser.AssignmentContext ctx) {
-        // Rempli
         String id = ctx.VAR().getText();
         Type variableType = lookup(id);
 
@@ -493,7 +469,7 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
             throw new RuntimeException("Type Error: Assignation sans expression.");
         }
 
-        // Expression de droite (RHS)
+        // Expression de droite
         Type expressionType = visit(exprs.get(exprs.size() - 1));
 
         // Si il y a des indices, vérifier qu'ils sont des INT et descendre dans le tableau
@@ -523,7 +499,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitBlock(grammarTCLParser.BlockContext ctx) {
-        // Rempli
         pushStage();
         for (grammarTCLParser.InstrContext instr : ctx.instr()) {
             visit(instr);
@@ -540,13 +515,12 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitIf(grammarTCLParser.IfContext ctx) {
-        // Rempli
         Type conditionType = visit(ctx.expr());
         unifyAndApply(conditionType, BOOL_TYPE, ctx); // La condition doit être BOOL
 
-        visit(ctx.instr(0)); // Branch THEN
+        visit(ctx.instr(0));
         if (ctx.instr().size() > 1) {
-            visit(ctx.instr(1)); // Branch ELSE
+            visit(ctx.instr(1));
         }
 
         return VOID_TYPE;
@@ -560,7 +534,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitWhile(grammarTCLParser.WhileContext ctx) {
-        // Rempli
         Type conditionType = visit(ctx.expr());
         unifyAndApply(conditionType, BOOL_TYPE, ctx);
 
@@ -576,7 +549,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitFor(grammarTCLParser.ForContext ctx) {
-        // Rempli
         pushStage();
         visit(ctx.instr(0)); // Initialisation
         Type tCond = visit(ctx.expr()); // Condition
@@ -595,13 +567,11 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitReturn(grammarTCLParser.ReturnContext ctx) {
-        // Rempli
         if (returnTypeStack.isEmpty()) {
             throw new RuntimeException("Type Error: Instruction 'return' en dehors d'une fonction.");
         }
         Type tExpected = returnTypeStack.peek();
 
-        // Correct selon le compilateur (méthode sans argument)
         Type tReturned = visit(ctx.expr());
         unifyAndApply(tExpected, tReturned, ctx);
 
@@ -615,8 +585,7 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitCore_fct(grammarTCLParser.Core_fctContext ctx) {
-        // Rempli
-        // Traiter toutes les instructions du bloc
+
         for (grammarTCLParser.InstrContext instructionCtx : ctx.instr()) {
             visit(instructionCtx);
         }
@@ -633,7 +602,6 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitDecl_fct(grammarTCLParser.Decl_fctContext ctx) {
-        // Rempli
         // 1. Récupération du type de retour (ctx.type(0))
         Type returnType = visit(ctx.type(0));
 
@@ -646,16 +614,15 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
         // 3. Créer et enregistrer la signature de la fonction (TypeFunction)
         FunctionType fctType = new FunctionType(returnType, argsTypes);
         String fctName = ctx.VAR(0).getText();
-        define(fctName, fctType); // Utilisation de define
+        define(fctName, fctType);
 
-        // 4. Typage du corps (gestion du scope et des paramètres)
-        pushStage(); // Nouveau scope pour les paramètres et variables locales
+        pushStage();
         returnTypeStack.push(returnType); // Type de retour attendu pour les 'return'
 
         // Enregistrement des paramètres dans le scope local
         for (int i = 0; i < ctx.VAR().size() - 1; i++) {
             String paramName = ctx.VAR(i+1).getText(); // Le premier ID est le nom de la fct
-            define(paramName, argsTypes.get(i)); // Utilisation de define
+            define(paramName, argsTypes.get(i));
         }
 
         visit(ctx.core_fct()); // Visiter le corps (qui gère son propre push/popStage d'après votre implémentation)
@@ -675,29 +642,34 @@ public class TyperVisitor extends AbstractParseTreeVisitor<Type> implements gram
      */
     @Override
     public Type visitMain(grammarTCLParser.MainContext ctx) {
-        // Rempli
         // 1. Enregistrement de la fonction main (dans le scope global, env est déjà initialisé)
         ArrayList<Type> mainArgs = new ArrayList<>();
         FunctionType mainType = new FunctionType(INT_TYPE, mainArgs);
-        define("main", mainType); // Utilisation de define
+        define("main", mainType);
 
         // 2. Préparation du type de retour attendu (main retourne INT_TYPE)
         returnTypeStack.push(INT_TYPE);
 
-        // 3. Visiter les déclarations de fonctions externes (enregistre les signatures)
         for (grammarTCLParser.Decl_fctContext fctCtx : ctx.decl_fct()) {
             visit(fctCtx);
         }
 
-        // 4. Visiter le corps de main (qui appellera visitCore_fct)
+        //  Visiter le corps de main (qui appellera visitCore_fct)
         visit(ctx.core_fct());
 
-        // 5. Nettoyage
+        //  Nettoyage
         returnTypeStack.pop();
 
         return VOID_TYPE;
     }
 
+    public Map<String, Type> getEnvironment() {
 
-    
+        Map<String, Type> result = new HashMap<>();
+
+        if (!env.isEmpty()) {
+            result.putAll(env.get(0));
+        }
+        return result;
+    }
 }
