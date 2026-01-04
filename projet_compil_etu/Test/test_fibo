@@ -1,0 +1,21 @@
+int fibo(int n) {
+    int a = 0;
+    int b = 1;
+    int i = 0;
+
+    while (i < n) {
+        print(a);
+        auto temp = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+
+    return 0;
+}
+
+int main() {
+    int n = 10;
+
+    return fibo(n);
+}
