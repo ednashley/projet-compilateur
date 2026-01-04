@@ -134,6 +134,7 @@ public class CodeOptimizer {
      *
      */
     private void createBlocks(){
+        InstructionBlock.nbBlocks = 0;
         this.blocks = new ArrayList<>();
 
         ArrayList<Instruction> instructions = program.getInstructions();
